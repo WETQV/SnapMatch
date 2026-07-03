@@ -1,25 +1,93 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python bytecode / caches
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.spec.bak
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments / local package state
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+
+# Local environment and secrets
 .env
 .env.*
+!.env.example
 .encryption_key
+*.key
+*.pem
+*.p12
+*.pfx
+
+# SnapMatch local runtime data
 config.json
+config.local.json
+*.local.json
 database.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
 session_stats.txt
 system_prompt_history.json
 system_prompt_templates.json
+app.log
+*.log
+*.log.*
+logs/
+
+# User-generated files and large local assets
 assets/uploads/
 assets/models/
+assets/tmp/
+assets/temp/
+assets/ffmpeg/
+ffmpeg-*/
+third_party/ffmpeg/
+
+# Build outputs
 build/
 dist/
 installer_output/
 version_info.txt
-*.log
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.venv/
-venv/
+*.spec.bak
+*.manifest
+
+# Release archives / installers
+*.exe
+*.msi
+*.deb
+*.rpm
+*.AppImage
+*.dmg
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.whl
+
+# Keep public templates and documentation assets
+!config.example.json
+!docs/screenshots/*.png
