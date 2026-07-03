@@ -1,0 +1,49 @@
+SnapMatch - Удобный Desktop помощник с ИИ
+
+О приложении:
+SnapMatch - это приложение для управления AI ботом в Telegram с графическим интерфейсом.
+
+Основные возможности:
+• Управление ботом через удобный GUI
+• Поддержка множественных AI моделей (LM Studio, Ollama, *etc.)
+• Интеллектуальная балансировка нагрузки между моделями
+• Детальная статистика использования и мониторинг
+• Гибкая настройка промптов и параметров моделей
+• Администраторская панель для управления пользователями
+
+Для кого:
+• Пользователи, желающие создать своего Telegram бота
+• И всем кто хочет удобно взаимодействовать с ИИ через Telegram
+
+Разработчик: WETQV
+Версия: 1.0.4.0
+Лицензия: GNU GPL v3
+
+Добро пожаловать в мир удобного взаимодействия с ИИ! 
+
+
+
+[Eng]
+
+SnapMatch - Handy Desktop Assistant with AI
+
+About the app:
+SnapMatch is an AI bot management app for Telegram with a graphical interface.
+
+Main features:
+- Bot management through a user-friendly GUI
+- Support for multiple AI models (LM Studio, Ollama, *etc.)
+- Intelligent load balancing between models
+- Detailed usage statistics and monitoring
+- Flexible customization of prompts and model parameters
+- Admin panel for user management
+
+For whom:
+- Users who want to create their own Telegram bot
+- And everyone who wants to conveniently interact with AI via Telegram.
+
+Developer: WETQV
+Version: 1.0.4.0
+License: GNU GPL v3
+
+Welcome to the world of convenient interaction with AI! 
