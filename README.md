@@ -59,7 +59,7 @@ Linux:
 bash build_linux.sh
 ```
 
-Windows installer включает FFmpeg, если `ffmpeg.exe` доступен рядом с проектом во время сборки. Linux-пакет зависит от системного `ffmpeg`. Подробности: [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md).
+Windows installer включает FFmpeg, если `ffmpeg.exe` доступен рядом с проектом во время сборки. Linux `.deb` собирается в GitHub Actions на Ubuntu 24.04 и зависит от системного `ffmpeg`; ручной запуск GUI на отдельной Linux-машине пока не проверялся. Подробности: [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md).
 
 ## Данные и локальные файлы
 

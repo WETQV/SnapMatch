@@ -91,7 +91,7 @@ sudo apt install ./dist/SnapMatch_1.0.4_amd64.deb
 SNAPMATCH_VERSION=1.0.4.0 bash build_linux.sh
 ```
 
-Linux-пакет собирается в GitHub Actions на `ubuntu-24.04`. Локально из Windows его не собрать без WSL/Docker, потому что PyInstaller не делает нормальную cross-platform сборку Windows -> Linux.
+Linux-пакет собирается в GitHub Actions на `ubuntu-24.04`. Ручная установка и запуск GUI на отдельной Debian/Ubuntu-машине пока не проверялись. Локально из Windows такой пакет не собрать без WSL/Docker, потому что PyInstaller не делает нормальную cross-platform сборку Windows -> Linux.
 
 ## Установщик Windows
 
