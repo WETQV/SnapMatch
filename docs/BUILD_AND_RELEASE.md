@@ -64,7 +64,7 @@ bash build_linux.sh
 
 ```txt
 dist/SnapMatch
-dist/SnapMatch_1.0.4.0_amd64.deb
+dist/SnapMatch_1.0.4_amd64.deb
 ```
 
 Пакет устанавливает приложение в:
@@ -82,7 +82,13 @@ snapmatch
 Установка `.deb`:
 
 ```sh
-sudo apt install ./dist/SnapMatch_1.0.4.0_amd64.deb
+sudo apt install ./dist/SnapMatch_1.0.4_amd64.deb
+```
+
+Для кастомной версии можно передать переменную:
+
+```sh
+SNAPMATCH_VERSION=1.0.4.0 bash build_linux.sh
 ```
 
 Linux-пакет собирается в GitHub Actions на `ubuntu-24.04`. Локально из Windows его не собрать без WSL/Docker, потому что PyInstaller не делает нормальную cross-platform сборку Windows -> Linux.

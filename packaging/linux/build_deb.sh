@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VERSION="${SNAPMATCH_VERSION:-1.0.4.0}"
+VERSION="${SNAPMATCH_VERSION:-1.0.4}"
 ARCH="${SNAPMATCH_ARCH:-amd64}"
 APP_BINARY="$ROOT_DIR/dist/SnapMatch"
 PACKAGE_ROOT="$ROOT_DIR/dist/deb/snapmatch_${VERSION}_${ARCH}"

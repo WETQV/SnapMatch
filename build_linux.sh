@@ -16,4 +16,4 @@ fi
 bash packaging/linux/build_deb.sh
 
 echo "Build complete: dist/SnapMatch"
-echo "Debian package: dist/SnapMatch_${SNAPMATCH_VERSION:-1.0.4.0}_${SNAPMATCH_ARCH:-amd64}.deb"
+echo "Debian package: dist/SnapMatch_${SNAPMATCH_VERSION:-1.0.4}_${SNAPMATCH_ARCH:-amd64}.deb"
