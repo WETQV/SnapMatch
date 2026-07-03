@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SnapMatch
+Comment=Telegram bot manager with AI models and MCP tools
+Exec=/opt/snapmatch/SnapMatch
+Icon=snapmatch
+Terminal=false
+Categories=Utility;Network;

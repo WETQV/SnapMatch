@@ -1,0 +1,99 @@
+{
+  "telegram_token": "",
+  "database_path": "database.db",
+  "log_file": "app.log",
+  "temperature": 0.7,
+  "max_tokens": 0,
+  "presence_penalty": 0.0,
+  "frequency_penalty": 0.0,
+  "top_p": 0.95,
+  "top_k": 40,
+  "repeat_penalty": 1.1,
+  "seed": -1,
+  "system_prompt": "",
+  "default_context_length": 4096,
+  "chat_system_notifications": true,
+  "format_markdown": true,
+  "format_html": true,
+  "rich_messages": {
+    "enabled": false,
+    "format": "markdown",
+    "fallback_to_legacy": true,
+    "skip_entity_detection": false,
+    "streaming_enabled": true,
+    "stream_draft_interval_seconds": 0.8
+  },
+  "admin_telegram_ids": [],
+  "telegram_menu": {
+    "enabled": true,
+    "allow_group_menu": true,
+    "colored_buttons_enabled": true,
+    "custom_emoji_ids": {},
+    "delete_menu_after_seconds": 300,
+    "require_confirm_for_dangerous_actions": true
+  },
+  "mcp": {
+    "enabled": false,
+    "limits": {
+      "tool_timeout_seconds": 30,
+      "max_tool_calls_per_request": 5,
+      "max_tool_result_chars": 12000
+    },
+    "servers": []
+  },
+  "load_balancing_strategy": "round_robin",
+  "group_parallel_mode": false,
+  "accept_bot_messages": true,
+  "bot_access_policy": {
+    "mode": "all",
+    "allow_bot_ids": [],
+    "deny_bot_ids": [],
+    "apply_in_private": true,
+    "apply_in_groups": true,
+    "apply_in_secretary": false
+  },
+  "history_summary_enabled": true,
+  "summary_trigger_ratio": 0.85,
+  "summary_max_lines": 8,
+  "summary_max_chars_per_line": 80,
+  "summary_min_messages": 6,
+  "max_summaries_in_prompt": 5,
+  "respond_only_on_mention": false,
+  "reject_empty_mentions": true,
+  "secretary_mode": {
+    "enabled": false,
+    "default_delay_seconds": 2.0,
+    "default_burst_window_seconds": 2.0,
+    "default_max_batch_messages": 10,
+    "default_session_ttl_seconds": 3600,
+    "allow_infinite_sessions": true,
+    "suppress_model_unavailable_notice": true,
+    "owners": []
+  },
+  "oled_mode": false,
+  "stt_enabled": false,
+  "stt_engine": "vosk",
+  "stt_model_path": "assets/models/stt/vosk",
+  "stt_annotate": false,
+  "stt_openai_key": "",
+  "stt_openai_model": "whisper-1",
+  "stt_groq_key": "",
+  "stt_groq_model": "whisper-large-v3",
+  "models": [
+    {
+      "id": "gpt-4.1-mini",
+      "api_key": "",
+      "base_url": "https://api.openai.com/v1",
+      "weight": 1,
+      "supports_vision": false,
+      "reasoning_mode": "default",
+      "reasoning_provider": "auto",
+      "reasoning_budget_tokens": 0,
+      "reasoning_hide_internal": true,
+      "disable_sampling_for_reasoning": true,
+      "max_concurrent_requests": 1,
+      "context_window_size": 4096,
+      "api_type": "openai"
+    }
+  ]
+}

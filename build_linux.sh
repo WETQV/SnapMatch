@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 python3 --version
+python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 rm -rf build dist
 pyinstaller --noconfirm --clean snapmatch.spec
@@ -12,4 +13,7 @@ if [ ! -f "dist/SnapMatch" ]; then
   exit 1
 fi
 
+bash packaging/linux/build_deb.sh
+
 echo "Build complete: dist/SnapMatch"
+echo "Debian package: dist/SnapMatch_${SNAPMATCH_VERSION:-1.0.4.0}_${SNAPMATCH_ARCH:-amd64}.deb"

@@ -38,13 +38,21 @@ def resolve_ffmpeg_path() -> str | None:
     """Возвращает путь к ffmpeg.exe (встроенный или системный)."""
     candidates: list[Path] = []
 
-    # PyInstaller: файлы лежат в _MEIPASS
+    def add_ffmpeg_dir(directory: Path):
+        candidates.append(directory / "ffmpeg.exe")
+        candidates.append(directory / "ffmpeg")
+
+    # PyInstaller: файлы, включенные в onefile, лежат в _MEIPASS.
     if getattr(sys, "_MEIPASS", None):
-        candidates.append(Path(sys._MEIPASS) / "assets" / "ffmpeg" / "ffmpeg.exe")
+        add_ffmpeg_dir(Path(sys._MEIPASS) / "assets" / "ffmpeg")
+
+    # Установщик Inno кладет FFmpeg рядом с установленным SnapMatch.exe.
+    if getattr(sys, "frozen", False):
+        add_ffmpeg_dir(Path(sys.executable).resolve().parent / "assets" / "ffmpeg")
 
     # Проектная структура: assets/ffmpeg/ffmpeg.exe рядом с кодом
     project_root = Path(__file__).resolve().parents[1]
-    candidates.append(project_root / "assets" / "ffmpeg" / "ffmpeg.exe")
+    add_ffmpeg_dir(project_root / "assets" / "ffmpeg")
 
     # Репозиторий: приоритет ставим на полноценные сборки
     repo_root = project_root.parent

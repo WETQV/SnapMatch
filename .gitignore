@@ -6,6 +6,7 @@ __pycache__/
 .env
 .env.*
 .encryption_key
+config.json
 database.db
 session_stats.txt
 system_prompt_history.json
