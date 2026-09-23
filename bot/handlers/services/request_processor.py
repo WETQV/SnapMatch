@@ -9,7 +9,6 @@ import hashlib
 import random
 import time
 import re
-import random
 from typing import Dict, Optional
 from copy import deepcopy
 
@@ -221,6 +220,40 @@ def _is_error_response(text: str) -> bool:
     return any(text_lower.startswith(prefix.lower()) for prefix in error_prefixes)
 
 
+def _save_assistant_response(
+    db: DatabaseManager,
+    user: Dict,
+    message,
+    content: str,
+    *,
+    chat_id: int,
+    chat_type: str,
+    chat_title: Optional[str],
+    source_mode: Optional[str],
+    secretary_owner_telegram_id: Optional[int],
+    secretary_source_chat_id: Optional[int],
+) -> None:
+    """Persist one response only after Telegram delivery has succeeded."""
+    db.messages.add_message(
+        user['id'],
+        'assistant',
+        content,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        chat_title=chat_title,
+        author_telegram_id=server_state.bot_id,
+        author_username=server_state.bot_username,
+        author_full_name=server_state.bot_full_name or server_state.bot_username or "Bot",
+        content_type='text',
+        reply_to_message_id=message.message_id,
+        is_addressed=1,
+        author_is_bot=1,
+        source_mode=source_mode or 'normal',
+        secretary_owner_telegram_id=secretary_owner_telegram_id,
+        secretary_source_chat_id=secretary_source_chat_id,
+    )
+
+
 async def _handle_secretary_response(
     *,
     db: DatabaseManager,
@@ -257,6 +290,7 @@ async def _handle_secretary_response(
     reply_to_message_id = getattr(message, "message_id", None)
 
     if mode == "auto":
+        response_lock_key = None
         if reply_to_message_id:
             lock_owner_id = int(secretary_owner_telegram_id)
             lock_chat_id = int(secretary_source_chat_id or chat_id)
@@ -277,7 +311,13 @@ async def _handle_secretary_response(
                     chat_id=chat_id,
                 )
                 return
-        transport = await _send_response_in_parts(message, cleaned_response, response_text, model_id, user["telegram_id"])
+            response_lock_key = (lock_owner_id, lock_chat_id, lock_message_id)
+        try:
+            transport = await _send_response_in_parts(message, cleaned_response, response_text, model_id, user["telegram_id"])
+        except Exception:
+            if response_lock_key:
+                db.secretary.release_response_lock(*response_lock_key)
+            raise
         if reply_to_message_id:
             db.secretary.mark_response_lock_sent(
                 int(secretary_owner_telegram_id),
@@ -774,12 +814,8 @@ async def process_request(
             else None
         )
 
-        # Увеличиваем счётчик активных запросов
-        async with get_model_stats_lock():
-            if model_id not in model_usage_stats:
-                model_usage_stats[model_id] = {"requests": 0, "errors": 0, "active_requests": 0}
-            model_usage_stats[model_id]["active_requests"] += 1
-            logger.debug(f"Счётчик активных запросов для {model_id} увеличен до {model_usage_stats[model_id]['active_requests']}")
+        # Capacity was reserved atomically by QueueProcessor before this task
+        # was created.  This worker only releases it in finally.
         
         wait_time = time.time() - enqueue_time
         stats.stats.add_wait_time(wait_time)
@@ -1407,22 +1443,10 @@ async def process_request(
                     cleaned_response = streaming_result
                     is_error = _is_error_response(cleaned_response)
                     if not is_error:
-                        bot_full_name = server_state.bot_full_name or server_state.bot_username or "Bot"
-                        db.messages.add_message(
-                            user['id'],
-                            'assistant',
-                            cleaned_response,
-                            chat_id=chat_id,
-                            chat_type=chat_type,
-                            chat_title=chat_title,
-                            author_telegram_id=server_state.bot_id,
-                            author_username=server_state.bot_username,
-                            author_full_name=bot_full_name,
-                            content_type='text',
-                            reply_to_message_id=message.message_id,
-                            is_addressed=1,
-                            author_is_bot=1,
-                            source_mode=source_mode or 'normal',
+                        _save_assistant_response(
+                            db, user, message, cleaned_response,
+                            chat_id=chat_id, chat_type=chat_type, chat_title=chat_title,
+                            source_mode=source_mode,
                             secretary_owner_telegram_id=secretary_owner_telegram_id,
                             secretary_source_chat_id=secretary_source_chat_id,
                         )
@@ -1444,22 +1468,10 @@ async def process_request(
                         await send_ephemeral_reply(message, cleaned_response)
                     else:
                         await _send_response_in_parts(message, cleaned_response, response_text, model_id, user['telegram_id'])
-                        bot_full_name = server_state.bot_full_name or server_state.bot_username or "Bot"
-                        db.messages.add_message(
-                            user['id'],
-                            'assistant',
-                            cleaned_response,
-                            chat_id=chat_id,
-                            chat_type=chat_type,
-                            chat_title=chat_title,
-                            author_telegram_id=server_state.bot_id,
-                            author_username=server_state.bot_username,
-                            author_full_name=bot_full_name,
-                            content_type='text',
-                            reply_to_message_id=message.message_id,
-                            is_addressed=1,
-                            author_is_bot=1,
-                            source_mode=source_mode or 'normal',
+                        _save_assistant_response(
+                            db, user, message, cleaned_response,
+                            chat_id=chat_id, chat_type=chat_type, chat_title=chat_title,
+                            source_mode=source_mode,
                             secretary_owner_telegram_id=secretary_owner_telegram_id,
                             secretary_source_chat_id=secretary_source_chat_id,
                         )
@@ -1537,22 +1549,10 @@ async def process_request(
                     "Сохраняем ответ ассистента в базу: [length=%s]",
                     len(cleaned_response or ""),
                 )
-                bot_full_name = server_state.bot_full_name or server_state.bot_username or "Bot"
-                db.messages.add_message(
-                    user['id'],
-                    'assistant',
-                    cleaned_response,
-                    chat_id=chat_id,
-                    chat_type=chat_type,
-                    chat_title=chat_title,
-                    author_telegram_id=server_state.bot_id,
-                    author_username=server_state.bot_username,
-                    author_full_name=bot_full_name,
-                    content_type='text',
-                    reply_to_message_id=message.message_id,
-                    is_addressed=1,
-                    author_is_bot=1,
-                    source_mode=source_mode or 'normal',
+                _save_assistant_response(
+                    db, user, message, cleaned_response,
+                    chat_id=chat_id, chat_type=chat_type, chat_title=chat_title,
+                    source_mode=source_mode,
                     secretary_owner_telegram_id=secretary_owner_telegram_id,
                     secretary_source_chat_id=secretary_source_chat_id,
                 )

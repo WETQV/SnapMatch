@@ -66,7 +66,17 @@ def normalize_server_config(config: Dict[str, Any]) -> Dict[str, Any]:
             "secretary": bool(access.get("secretary", False)),
         },
         "description": str(config.get("description") or "").strip(),
-        "tools": list(config.get("tools") or []),
+        # Keep the flag absent when it was not configured explicitly.  The
+        # permission layer then applies its conservative name-based fallback.
+        "tools": [
+            (
+                {**tool, "requires_confirmation": bool(tool.get("requires_confirmation"))}
+                if "requires_confirmation" in tool
+                else dict(tool)
+            )
+            for tool in (config.get("tools") or [])
+            if isinstance(tool, dict)
+        ],
         "resources": list(config.get("resources") or []),
         "resource_templates": list(config.get("resource_templates") or []),
         "prompts": list(config.get("prompts") or []),

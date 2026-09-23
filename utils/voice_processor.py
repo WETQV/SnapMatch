@@ -1,5 +1,7 @@
 # utils/voice_processor.py
 
+import asyncio
+import importlib
 import json
 import os
 import re
@@ -35,33 +37,27 @@ def _looks_like_suspicious_stt_result(text: str) -> bool:
 
 
 def resolve_ffmpeg_path() -> str | None:
-    """Возвращает путь к ffmpeg.exe (встроенный или системный)."""
+    """Return a bundled or system FFmpeg executable when Vosk needs one."""
     candidates: list[Path] = []
+    executable = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 
-    def add_ffmpeg_dir(directory: Path):
-        candidates.append(directory / "ffmpeg.exe")
-        candidates.append(directory / "ffmpeg")
-
-    # PyInstaller: файлы, включенные в onefile, лежат в _MEIPASS.
+    # PyInstaller: файлы лежат в _MEIPASS
     if getattr(sys, "_MEIPASS", None):
-        add_ffmpeg_dir(Path(sys._MEIPASS) / "assets" / "ffmpeg")
-
-    # Установщик Inno кладет FFmpeg рядом с установленным SnapMatch.exe.
-    if getattr(sys, "frozen", False):
-        add_ffmpeg_dir(Path(sys.executable).resolve().parent / "assets" / "ffmpeg")
+        candidates.append(Path(sys._MEIPASS) / "assets" / "ffmpeg" / executable)
 
     # Проектная структура: assets/ffmpeg/ffmpeg.exe рядом с кодом
     project_root = Path(__file__).resolve().parents[1]
-    add_ffmpeg_dir(project_root / "assets" / "ffmpeg")
+    candidates.append(project_root / "assets" / "ffmpeg" / executable)
 
     # Репозиторий: приоритет ставим на полноценные сборки
     repo_root = project_root.parent
+    if os.name == 'nt':
     # 1. Новая essentials сборка (самая надежная)
-    candidates.append(repo_root / "ffmpeg-2026-01-26-git-fe0813d6e2-essentials_build" / "bin" / "ffmpeg.exe")
+        candidates.append(repo_root / "ffmpeg-2026-01-26-git-fe0813d6e2-essentials_build" / "bin" / "ffmpeg.exe")
     # 2. Стандартный путь (если переименовали)
-    candidates.append(repo_root / "ffmpeg-8.0.1-win64-static" / "bin" / "ffmpeg.exe")
+        candidates.append(repo_root / "ffmpeg-8.0.1-win64-static" / "bin" / "ffmpeg.exe")
     # 3. Аудио-сборка (только как последний шанс, хотя она может не подойти)
-    candidates.append(repo_root / "ffmpeg-8.0-audio-x86_64-w64-mingw32" / "ffmpeg-8.0-audio-x86_64-w64-mingw32" / "bin" / "ffmpeg.exe")
+        candidates.append(repo_root / "ffmpeg-8.0-audio-x86_64-w64-mingw32" / "ffmpeg-8.0-audio-x86_64-w64-mingw32" / "bin" / "ffmpeg.exe")
 
     for candidate in candidates:
         if candidate.exists():
@@ -69,26 +65,40 @@ def resolve_ffmpeg_path() -> str | None:
 
     return shutil.which("ffmpeg")
 
-# Попытка импорта vosk (будет работать если библиотека установлена)
-try:
-    from vosk import Model, KaldiRecognizer
-    VOSK_AVAILABLE = True
-except ImportError:
-    VOSK_AVAILABLE = False
-    logger.warning("Библиотека Vosk не установлена. Локальный STT будет недоступен.")
-
 class VoiceProcessor:
     def __init__(self):
         self.model = None
         self.current_model_path = None
+        self._vosk_module = None
+        self._vosk_import_error = None
+
+    def _load_vosk_module(self):
+        """Import Vosk only when the local engine is actually selected."""
+        if self._vosk_module is not None:
+            return self._vosk_module
+        try:
+            self._vosk_module = importlib.import_module("vosk")
+            return self._vosk_module
+        except Exception as e:
+            self._vosk_import_error = e
+            logger.warning("Vosk недоступен: %s", e)
+            raise RuntimeError(
+                "Vosk не установлен или его нативная библиотека не загрузилась. "
+                "Установите локальные STT-зависимости либо выберите openai, groq или custom."
+            ) from e
 
     def _ensure_model_loaded(self):
         """Ленивая загрузка модели Vosk"""
-        if not VOSK_AVAILABLE:
-            raise RuntimeError("Библиотека vosk не установлена. Выполните: pip install vosk")
+        vosk_module = self._load_vosk_module()
 
         settings = settings_manager.get_settings()
-        model_path = settings.get('stt_model_path', 'assets/models/stt/vosk')
+        configured_model_path = settings.get('stt_model_path', 'assets/models/stt/vosk')
+        model_path = Path(configured_model_path).expanduser()
+        if not model_path.is_absolute() and getattr(sys, "_MEIPASS", None):
+            bundled_model_path = Path(sys._MEIPASS) / model_path
+            if bundled_model_path.exists():
+                model_path = bundled_model_path
+        model_path = str(model_path)
 
         if self.model is not None and self.current_model_path == model_path:
             return
@@ -98,7 +108,7 @@ class VoiceProcessor:
 
         logger.info(f"Загрузка модели Vosk из {model_path}...")
         try:
-            self.model = Model(model_path)
+            self.model = vosk_module.Model(model_path)
             self.current_model_path = model_path
             logger.info("Модель Vosk успешно загружена.")
         except Exception as e:
@@ -119,7 +129,7 @@ class VoiceProcessor:
         
         if engine == 'vosk':
             text = await self._transcribe_vosk(media_path)
-        elif engine in ['openai', 'groq']:
+        elif engine in ['openai', 'groq', 'custom']:
             text = await self._transcribe_cloud(media_path, engine)
         else:
             text = ""
@@ -132,38 +142,48 @@ class VoiceProcessor:
             )
         return cleaned
 
-    async def _transcribe_cloud(self, ogg_path: str, engine: str) -> str:
-        """Распознавание через OpenAI или Groq API"""
+    async def _transcribe_cloud(self, media_path: str, engine: str) -> str:
+        """Распознавание через OpenAI-совместимый transcription API."""
         settings = settings_manager.get_settings()
         
         if engine == 'openai':
             api_key = settings.get('stt_openai_key')
             model = settings.get('stt_openai_model', 'whisper-1')
             base_url = "https://api.openai.com/v1"
-        else: # groq
+        elif engine == 'groq':
             api_key = settings.get('stt_groq_key')
             model = settings.get('stt_groq_model', 'whisper-large-v3-turbo')
             base_url = "https://api.groq.com/openai/v1"
+        else:
+            api_key = settings.get('stt_custom_key') or ""
+            model = settings.get('stt_custom_model', 'whisper-1')
+            base_url = str(settings.get('stt_custom_base_url') or '').rstrip('/')
 
-        if not api_key:
+        if not base_url.startswith(('http://', 'https://')):
+            raise RuntimeError("Base URL STT должен начинаться с http:// или https://")
+
+        if engine != 'custom' and not api_key:
             raise RuntimeError(f"Не указан API ключ для {engine} во вкладке 'Голос'.")
 
         # Для облачных API отправляем OGG напрямую (оба сервиса это поддерживают)
         # Используем aiohttp вместо httpx для совместимости с PyInstaller
         try:
             import aiohttp
-            headers = {"Authorization": f"Bearer {api_key}"}
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
             url = f"{base_url}/audio/transcriptions"
-            ssl_context = None
+            max_upload_bytes = max(1, int(settings.get('stt_max_upload_mb', 25) or 25)) * 1024 * 1024
 
-            # Читаем файл в память перед отправкой (чтобы избежать проблем с закрытием файла)
-            with open(ogg_path, "rb") as f:
+            if os.path.getsize(media_path) > max_upload_bytes:
+                raise RuntimeError("Аудиофайл превышает настроенный лимит STT.")
+            with open(media_path, "rb") as f:
                 file_data = f.read()
             
             async with aiohttp.ClientSession() as session:
                 # aiohttp использует FormData для multipart/form-data
                 form_data = aiohttp.FormData()
-                form_data.add_field('file', file_data, filename=os.path.basename(ogg_path), content_type='audio/ogg')
+                import mimetypes
+                content_type = mimetypes.guess_type(media_path)[0] or 'application/octet-stream'
+                form_data.add_field('file', file_data, filename=os.path.basename(media_path), content_type=content_type)
                 form_data.add_field('model', model)
                 form_data.add_field('language', 'ru')
                 
@@ -172,7 +192,6 @@ class VoiceProcessor:
                         url, 
                         data=form_data, 
                         headers=headers, 
-                        ssl=ssl_context,
                         timeout=aiohttp.ClientTimeout(total=180.0)
                     ) as response:
                         # Явно проверяем статус перед закрытием контекста клиента
@@ -182,7 +201,7 @@ class VoiceProcessor:
                                 error_data = await response.json()
                                 error_detail = error_data.get('error', {})
                                 error_msg = error_detail.get('message', str(error_detail))
-                            except:
+                            except Exception:
                                 pass
                             raise RuntimeError(f"Ошибка API {engine}: {error_msg}")
                         
@@ -197,6 +216,9 @@ class VoiceProcessor:
             raise
 
     async def _transcribe_vosk(self, media_path: str) -> str:
+        return await asyncio.wait_for(asyncio.to_thread(self._transcribe_vosk_sync, media_path), timeout=300)
+
+    def _transcribe_vosk_sync(self, media_path: str) -> str:
         self._ensure_model_loaded()
 
         wav_path = str(Path(media_path).with_suffix(".wav"))
@@ -226,45 +248,37 @@ class VoiceProcessor:
                 command, 
                 check=True, 
                 capture_output=True, 
-                startupinfo=startupinfo
+                startupinfo=startupinfo,
+                timeout=180,
             )
-        except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg conversion error: {e.stderr.decode()}")
-            raise RuntimeError("Ошибка конвертации аудио. Пожалуйста, попробуйте позже.")
-        except FileNotFoundError:
-            raise RuntimeError("Системный компонент (FFmpeg) не найден. Обратитесь к администратору.")
-
-        try:
             import wave
-            wf = wave.open(wav_path, "rb")
-            
-            # Проверка формата WAV
-            if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
-                wf.close()
-                raise RuntimeError("Неверный формат WAV после конвертации.")
+            with wave.open(wav_path, "rb") as wf:
+                if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
+                    raise RuntimeError("Неверный формат WAV после конвертации.")
 
-            rec = KaldiRecognizer(self.model, wf.getframerate())
-            rec.SetWords(True)
-
-            results = []
-            while True:
-                data = wf.readframes(4000)
-                if len(data) == 0:
-                    break
-                if rec.AcceptWaveform(data):
-                    pass # Промежуточные результаты нам не нужны
-            
-            final_result = json.loads(rec.FinalResult())
-            text = final_result.get("text", "")
-            
-            wf.close()
-            return text
+                vosk_module = self._load_vosk_module()
+                rec = vosk_module.KaldiRecognizer(self.model, wf.getframerate())
+                rec.SetWords(True)
+                while True:
+                    data = wf.readframes(4000)
+                    if not data:
+                        break
+                    rec.AcceptWaveform(data)
+                return json.loads(rec.FinalResult()).get("text", "")
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else str(e.stderr or "")
+            logger.error("FFmpeg conversion error: %s", stderr)
+            raise RuntimeError("Ошибка конвертации аудио. Пожалуйста, попробуйте позже.") from e
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("FFmpeg не успел обработать аудио за отведённое время.") from e
+        except FileNotFoundError as e:
+            raise RuntimeError("Системный компонент (FFmpeg) не найден. Обратитесь к администратору.") from e
         finally:
             # Чистим за собой временный WAV
             if os.path.exists(wav_path):
                 try:
                     os.remove(wav_path)
-                except:
+                except Exception:
                     pass
 
 voice_processor = VoiceProcessor()

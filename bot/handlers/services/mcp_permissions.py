@@ -92,6 +92,18 @@ CALCULATOR_TOOL_MARKERS = (
     "math",
 )
 
+DANGEROUS_TOOL_NAME_MARKERS = (
+    "delete", "remove", "drop", "clear", "purge", "write", "update", "edit",
+    "create", "send", "post", "publish", "execute", "run", "restart", "stop",
+    "kill", "install", "purchase", "buy", "charge", "grant", "revoke",
+)
+
+
+def _tool_requires_confirmation(tool: Dict[str, Any]) -> bool:
+    name = str(tool.get("name") or "").strip().lower()
+    dangerous_name = any(marker in name for marker in DANGEROUS_TOOL_NAME_MARKERS)
+    return bool(tool.get("requires_confirmation", False)) or dangerous_name
+
 VAGUE_FOLLOWUP_MARKERS = (
     "а сейчас",
     "а сегодня",
@@ -136,14 +148,25 @@ def allowed_servers_for_context(settings: Dict[str, Any], request_context: Dict[
 
 def allowed_tools_for_context(settings: Dict[str, Any], request_context: Dict[str, Any]) -> List[Dict[str, Any]]:
     allowed_mcp_names = _parse_allowed_mcp_names(request_context.get("allowed_mcp"))
+    accessible_servers = allowed_servers_for_context(settings, request_context)
+    tool_name_counts: Dict[str, int] = {}
+    for server in accessible_servers:
+        for tool in server.get("tools") or []:
+            if isinstance(tool, dict):
+                name = str(tool.get("name") or "").strip()
+                if name:
+                    tool_name_counts[name] = tool_name_counts.get(name, 0) + 1
     tools = []
-    for server in allowed_servers_for_context(settings, request_context):
+    for server in accessible_servers:
         server_name = str(server.get("name") or "").strip()
         if allowed_mcp_names and server_name not in allowed_mcp_names:
             server_tools = server.get("tools") or []
             has_allowed_tool = any(
                 f"{server_name}__{str(tool.get('name') or '').strip()}" in allowed_mcp_names
-                or str(tool.get("name") or "").strip() in allowed_mcp_names
+                or (
+                    str(tool.get("name") or "").strip() in allowed_mcp_names
+                    and tool_name_counts.get(str(tool.get("name") or "").strip(), 0) == 1
+                )
                 for tool in server_tools
                 if isinstance(tool, dict)
             )
@@ -155,13 +178,15 @@ def allowed_tools_for_context(settings: Dict[str, Any], request_context: Dict[st
                 continue
             if allowed_mcp_names and server_name not in allowed_mcp_names:
                 full_name = f"{server_name}__{tool_name}"
-                if full_name not in allowed_mcp_names and tool_name not in allowed_mcp_names:
+                short_name_allowed = tool_name in allowed_mcp_names and tool_name_counts.get(tool_name, 0) == 1
+                if full_name not in allowed_mcp_names and not short_name_allowed:
                     continue
             tools.append({
                 "server": server_name,
                 "name": tool_name,
                 "description": tool.get("description", "") or "",
                 "input_schema": tool.get("input_schema") or {},
+                "requires_confirmation": _tool_requires_confirmation(tool),
             })
     tools = _prefer_resilient_web_tools(tools)
 
@@ -296,15 +321,19 @@ def _parse_allowed_mcp_names(value: Any) -> set[str]:
     return {str(item).strip() for item in raw_items if str(item).strip()}
 
 
-def to_openai_tool_schema(tool: Dict[str, Any]) -> Dict[str, Any]:
+def tool_function_name(tool: Dict[str, Any]) -> str:
     server_name = str(tool.get("server") or "").strip()
     tool_name = str(tool.get("name") or "").strip()
     function_name = f"{server_name}__{tool_name}" if server_name else tool_name
-    function_name = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in function_name)
+    return "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in function_name)[:64]
+
+
+def to_openai_tool_schema(tool: Dict[str, Any]) -> Dict[str, Any]:
+    function_name = tool_function_name(tool)
     return {
         "type": "function",
         "function": {
-            "name": function_name[:64],
+            "name": function_name,
             "description": str(tool.get("description") or "")[:1024],
             "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
         },
@@ -313,6 +342,15 @@ def to_openai_tool_schema(tool: Dict[str, Any]) -> Dict[str, Any]:
 
 def allowed_openai_tools_for_context(settings: Dict[str, Any], request_context: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [to_openai_tool_schema(tool) for tool in allowed_tools_for_context(settings, request_context)]
+
+
+def allowed_tool_keys_for_context(settings: Dict[str, Any], request_context: Dict[str, Any]) -> set[tuple[str, str]]:
+    """Return the exact server/tool pairs authorized for this request."""
+    return {
+        (str(tool.get("server") or ""), str(tool.get("name") or ""))
+        for tool in allowed_tools_for_context(settings, request_context)
+        if tool.get("server") and tool.get("name")
+    }
 
 
 def to_anthropic_tool_schema(tool: Dict[str, Any]) -> Dict[str, Any]:

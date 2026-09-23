@@ -77,6 +77,8 @@ class QueueProcessor:
                 request_delegated = False
                 request_requeued = False
                 current_user_id = None
+                model_slot_reserved = False
+                model_id = None
                 
                 if not self.request_queue.empty():
                     # Get next request from queue
@@ -98,6 +100,21 @@ class QueueProcessor:
 
                     wait_time = time.time() - enqueue_time
 
+                    # Preserve every request, but execute requests belonging to
+                    # one database user sequentially.
+                    if current_user_id is not None and self.user_locks.get(current_user_id, False):
+                        retry_count = payload.get('retry_count', 0) if isinstance(payload, dict) else 0
+                        delay = min(0.2 * (1.5 ** retry_count), 2.0)
+                        payload = payload.copy() if isinstance(payload, dict) else payload
+                        if isinstance(payload, dict):
+                            payload['retry_count'] = retry_count + 1
+                        await self.request_queue.put((priority, time.monotonic_ns(), message, user, enqueue_time, payload))
+                        request_requeued = True
+                        self.request_queue.task_done()
+                        task_done_called = True
+                        await asyncio.sleep(delay)
+                        continue
+
                     # Try to acquire group slot if sequential mode
                     if sequential_group:
                         if not await self.group_manager.try_acquire_group_slot(chat_id):
@@ -116,7 +133,7 @@ class QueueProcessor:
                             if isinstance(payload, dict):
                                 payload['retry_count'] = retry_count + 1
                             
-                            await self.request_queue.put((priority, counter, message, user, enqueue_time, payload))
+                            await self.request_queue.put((priority, time.monotonic_ns(), message, user, enqueue_time, payload))
                             request_requeued = True
                             logger.debug(
                                 "Чат %s в последовательном режиме (user_priority=%s): предыдущий ответ еще формируется, "
@@ -152,7 +169,15 @@ class QueueProcessor:
                             payload['requires_vision'] = False
                     
                     # Select model according to load balancing strategy
-                    model_id = select_model_for_request(requires_vision=requires_vision)
+                    # Selection and capacity reservation must be atomic.  The
+                    # worker releases the reservation in its finally block.
+                    async with get_model_stats_lock():
+                        model_id = select_model_for_request(requires_vision=requires_vision)
+                        if model_id:
+                            if model_id not in model_usage_stats:
+                                model_usage_stats[model_id] = {"requests": 0, "errors": 0, "active_requests": 0}
+                            model_usage_stats[model_id]["active_requests"] += 1
+                            model_slot_reserved = True
 
                     if not model_id:
                         # No model available - put request back with exponential backoff
@@ -216,7 +241,7 @@ class QueueProcessor:
                             payload['model_retry_count'] = model_retry_count + 1
                             payload['retry_count'] = payload.get('retry_count', 0) + 1
                         
-                        await self.request_queue.put((priority, counter, message, user, enqueue_time, payload))
+                        await self.request_queue.put((priority, time.monotonic_ns(), message, user, enqueue_time, payload))
                         request_requeued = True
                         if group_slot_acquired and chat_id is not None:
                             await self.group_manager.release_group_slot(chat_id)
@@ -244,6 +269,9 @@ class QueueProcessor:
                             total_requests,
                             user_priority,
                         )
+
+                    if current_user_id is not None:
+                        self.user_locks[current_user_id] = True
 
                     # Create task to process this request
                     task = asyncio.create_task(
@@ -284,6 +312,12 @@ class QueueProcessor:
                     and not request_requeued
                 ):
                     self.user_locks[current_user_id] = False
+                if model_slot_reserved and model_id and not request_delegated:
+                    async with get_model_stats_lock():
+                        if model_id in model_usage_stats:
+                            model_usage_stats[model_id]["active_requests"] = max(
+                                0, model_usage_stats[model_id].get("active_requests", 1) - 1
+                            )
                 if queue_item_acquired and not task_done_called:
                     try:
                         self.request_queue.task_done()

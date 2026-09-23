@@ -19,7 +19,7 @@ import asyncio
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from PyQt6.QtCore import QThread, pyqtSignal
-from utils.logger import setup_logger
+from utils.logger import configure_file_logging, setup_logger
 from utils.resource_manager import get_resource_path, load_app_icon
 from config.settings import settings_manager
 from bot.handlers.command_handlers import start_command, clear_history_command, reload_models_command, reset_context_command, my_chat_member_handler
@@ -184,8 +184,10 @@ class BotThread(QThread):
             self.started_signal.emit()
 
             try:
-                await self.bot.delete_webhook(drop_pending_updates=True)
-                logger.info("Pending Telegram updates dropped before polling start")
+                # Keep updates received while the desktop app was offline.  The
+                # message handler has an explicit backlog path for these updates.
+                await self.bot.delete_webhook(drop_pending_updates=False)
+                logger.info("Pending Telegram updates preserved before polling start")
             except Exception as exc:
                 logger.warning("Не удалось сбросить pending updates перед polling: %s", exc)
 
@@ -357,6 +359,7 @@ class BotThread(QThread):
             logger.error(f"Ошибка при сохранении статистики сеанса: {e}")
 
 if __name__ == '__main__':
+    configure_file_logging(settings_manager.get_settings().get('log_file', 'app.log'))
     single_instance_lock = acquire_single_instance_lock()
     if single_instance_lock is None:
         logger.warning("SnapMatch is already running; second instance exits.")

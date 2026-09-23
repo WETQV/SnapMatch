@@ -805,9 +805,10 @@ class MessageDB(BaseDB):
     ) -> List[Dict]:
         try:
             query = [
-                "SELECT * FROM messages",
+                "SELECT * FROM (SELECT * FROM messages",
                 "WHERE chat_id = ?",
                 "AND is_archived = 0",
+                "AND COALESCE(is_deleted, 0) = 0",
             ]
             params: List = [chat_id]
             if source_mode is not None:
@@ -819,9 +820,10 @@ class MessageDB(BaseDB):
             if secretary_source_chat_id is not None:
                 query.append("AND secretary_source_chat_id = ?")
                 params.append(secretary_source_chat_id)
-            query.append("ORDER BY timestamp ASC")
-            query.append("LIMIT ?")
+            query.append("ORDER BY timestamp DESC, id DESC")
+            query.append("LIMIT ?)")
             params.append(limit)
+            query.append("ORDER BY timestamp ASC, id ASC")
             self.cursor.execute(" ".join(query), tuple(params))
             messages = self.cursor.fetchall()
             return [dict(zip([column[0] for column in self.cursor.description], row)) for row in messages]
@@ -842,9 +844,10 @@ class MessageDB(BaseDB):
     ):
         try:
             query = [
-                "SELECT * FROM messages",
+                "SELECT * FROM (SELECT * FROM messages",
                 "WHERE user_id = ?",
                 "AND is_archived = 0",
+                "AND COALESCE(is_deleted, 0) = 0",
             ]
             params: List = [user_id]
 
@@ -866,9 +869,10 @@ class MessageDB(BaseDB):
                 query.append("AND secretary_source_chat_id = ?")
                 params.append(secretary_source_chat_id)
 
-            query.append("ORDER BY timestamp ASC")
-            query.append("LIMIT ?")
+            query.append("ORDER BY timestamp DESC, id DESC")
+            query.append("LIMIT ?)")
             params.append(limit)
+            query.append("ORDER BY timestamp ASC, id ASC")
 
             final_query = " ".join(query)
             self.cursor.execute(final_query, tuple(params))
@@ -887,10 +891,11 @@ class MessageDB(BaseDB):
     ) -> List[Dict]:
         try:
             query = [
-                "SELECT * FROM messages",
+                "SELECT * FROM (SELECT * FROM messages",
                 "WHERE source_mode = 'secretary'",
                 "AND secretary_owner_telegram_id = ?",
                 "AND is_archived = 0",
+                "AND COALESCE(is_deleted, 0) = 0",
             ]
             params: List = [owner_telegram_id]
 
@@ -898,9 +903,10 @@ class MessageDB(BaseDB):
                 query.append("AND (chat_id = ? OR secretary_source_chat_id = ?)")
                 params.extend([chat_id, chat_id])
 
-            query.append("ORDER BY timestamp ASC")
-            query.append("LIMIT ?")
+            query.append("ORDER BY timestamp DESC, id DESC")
+            query.append("LIMIT ?)")
             params.append(limit)
+            query.append("ORDER BY timestamp ASC, id ASC")
 
             self.cursor.execute(" ".join(query), tuple(params))
             messages = self.cursor.fetchall()

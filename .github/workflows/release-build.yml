@@ -6,7 +6,7 @@ on:
       tag:
         description: Release tag to upload assets to
         required: true
-        default: v1.0.4
+        default: v1.0.4.3
       upload_release:
         description: Upload built assets to the release
         required: true

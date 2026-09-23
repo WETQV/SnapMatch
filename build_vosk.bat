@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ==========================================
-echo    Building SnapMatch Standard by WETQV
+echo    Building SnapMatch with Vosk by WETQV
 echo ==========================================
 echo.
 echo Current directory: %CD%
@@ -16,7 +16,7 @@ python --version 2>nul || (
 echo.
 
 echo Installing dependencies...
-pip install -r requirements.txt
+pip install -r requirements-local-stt.txt
 if errorlevel 1 (
     echo ERROR: Failed to install dependencies!
     pause
@@ -91,22 +91,23 @@ if not exist "%ICON_PATH%" (
 echo.
 
 echo Running PyInstaller using snapmatch.spec...
-set "SNAPMATCH_BUNDLE_VOSK="
+set "SNAPMATCH_BUNDLE_VOSK=1"
 pyinstaller --noconfirm --clean snapmatch.spec
+if exist "dist\SnapMatch.exe" move /y "dist\SnapMatch.exe" "dist\SnapMatch_Vosk.exe" >nul
 
 echo.
-if exist "dist\SnapMatch.exe" (
+if exist "dist\SnapMatch_Vosk.exe" (
     echo ==========================================
     echo SUCCESS! SnapMatch.exe built successfully!
     echo ==========================================
     echo.
-    echo File location: %CD%\dist\SnapMatch.exe
-    for %%I in (dist\SnapMatch.exe) do (
+    echo File location: %CD%\dist\SnapMatch_Vosk.exe
+    for %%I in (dist\SnapMatch_Vosk.exe) do (
         set /a size_mb=%%~zI/1024/1024
         echo File size: %%~zI bytes (~!size_mb! MB^)
     )
-    echo Building standard installer...
-    call build_installer.bat SnapMatch_Installer.iss SnapMatch_Setup_v1.0.4.3.exe nopause
+    echo Building Vosk installer...
+    call build_installer.bat SnapMatch_Installer_Vosk.iss SnapMatch_Setup_Vosk_v1.0.4.3.exe nopause
     if errorlevel 1 exit /b 1
     echo.
     echo Created by: WETQV
@@ -116,11 +117,11 @@ if exist "dist\SnapMatch.exe" (
     set /p choice=
     if /i "!choice!"=="y" (
         echo Starting SnapMatch...
-        start "" "dist\SnapMatch.exe"
+        start "" "dist\SnapMatch_Vosk.exe"
     )
 ) else (
     echo ==========================================
-    echo BUILD FAILED! SnapMatch.exe was not created.
+    echo BUILD FAILED! SnapMatch_Vosk.exe was not created.
     echo ==========================================
     echo Check the logs above for error details.
     echo.

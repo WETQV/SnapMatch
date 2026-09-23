@@ -22,7 +22,13 @@ from utils.tokenizer import count_message_tokens, count_tokens
 from utils.llm_response import TokenUsage
 from .text_cleaner import clean_response
 from .model_request_builder import build_model_request_params, has_reasoning_params, strip_reasoning_params
-from .mcp_permissions import allowed_anthropic_tools_for_context, allowed_openai_tools_for_context, allowed_servers_for_context
+from .mcp_permissions import (
+    allowed_anthropic_tools_for_context,
+    allowed_openai_tools_for_context,
+    allowed_servers_for_context,
+    allowed_tools_for_context,
+    tool_function_name,
+)
 from .mcp_registry import get_mcp_settings
 from .mcp_runtime import McpRuntimeError, call_server_tool_async, is_mcp_sdk_available
 from utils.database.database_manager import DatabaseManager
@@ -1163,6 +1169,15 @@ def _assistant_tool_call_message(response, tool_calls: Optional[List[Dict]] = No
 async def _execute_mcp_tool_calls(tool_calls: List[Dict], settings: Dict, request_context: Dict) -> List[Dict]:
     servers = allowed_servers_for_context(settings, request_context)
     server_by_name = {server.get("name"): server for server in servers}
+    allowed_tools = allowed_tools_for_context(settings, request_context)
+    tool_candidates: Dict[str, List[Dict]] = {}
+    for allowed_tool in allowed_tools:
+        tool_candidates.setdefault(tool_function_name(allowed_tool), []).append(allowed_tool)
+    confirmation_required = {
+        (str(tool.get("server") or ""), str(tool.get("name") or ""))
+        for tool in allowed_tools
+        if tool.get("requires_confirmation")
+    }
     mcp_settings = get_mcp_settings(settings)
     limits = mcp_settings.get("limits") or {}
     max_calls = int(limits.get("max_tool_calls_per_request", 5) or 5)
@@ -1186,15 +1201,17 @@ async def _execute_mcp_tool_calls(tool_calls: List[Dict], settings: Dict, reques
                     reason="max_tool_calls_per_request exceeded",
                 )
                 continue
-            if "__" not in function_name:
+            candidates = tool_candidates.get(function_name, [])
+            if len(candidates) != 1:
                 db.mcp.add_access_denied(
                     server_name="",
                     tool_name=function_name,
                     request_context=request_context,
-                    reason="invalid tool function name",
+                    reason="tool not allowed or ambiguous for request",
                 )
                 continue
-            server_name, tool_name = function_name.split("__", 1)
+            server_name = str(candidates[0].get("server") or "")
+            tool_name = str(candidates[0].get("name") or "")
             server = server_by_name.get(server_name)
             if not server:
                 logger.warning("MCP tool denied or unknown server: %s", server_name)
@@ -1204,6 +1221,23 @@ async def _execute_mcp_tool_calls(tool_calls: List[Dict], settings: Dict, reques
                     request_context=request_context,
                     reason="server denied or unknown",
                 )
+                continue
+            require_confirmation = bool(
+                (settings.get("telegram_menu") or {}).get("require_confirm_for_dangerous_actions", True)
+            )
+            if require_confirmation and (server_name, tool_name) in confirmation_required:
+                db.mcp.add_access_denied(
+                    server_name=server_name,
+                    tool_name=tool_name,
+                    request_context=request_context,
+                    reason="tool requires explicit user confirmation",
+                )
+                tool_messages.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": function_name,
+                    "content": "Инструмент требует явного подтверждения пользователя и не был выполнен.",
+                })
                 continue
             try:
                 arguments = json.loads(arguments_raw) if isinstance(arguments_raw, str) else dict(arguments_raw)

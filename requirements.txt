@@ -7,14 +7,4 @@ cryptography
 httpx
 mistune
 tiktoken
-vosk
 mcp
-pydantic
-pydantic-settings
-httpx-sse
-jsonschema
-starlette
-sse-starlette
-uvicorn
-PyJWT
-python-multipart

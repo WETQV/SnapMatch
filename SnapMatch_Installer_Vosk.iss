@@ -9,6 +9,7 @@
 #define MyAppDeveloper "WETQV"
 #define MyAppURL "https://github.com/WETQV/SnapMatch"
 #define MyAppExeName "SnapMatch.exe"
+#define MyAppSourceExe "SnapMatch_Vosk.exe"
 #define MyAppAssocName "SnapMatch Config File"
 #define MyAppAssocExt ".snapconfig"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
@@ -32,7 +33,7 @@ DisableProgramGroupPage=yes
 DisableWelcomePage=no
 LicenseFile=LICENSE
 OutputDir=installer_output
-OutputBaseFilename=SnapMatch_Setup_v{#MyAppVersion}
+OutputBaseFilename=SnapMatch_Setup_Vosk_v{#MyAppVersion}
 ; Используем альтернативную иконку
 SetupIconFile=assets\icon3.ico
 WizardImageFile=WizardImageFile.png
@@ -42,9 +43,9 @@ VersionInfoProductVersion={#MyAppVersion}
 VersionInfoTextVersion={#MyAppVersion}
 VersionInfoProductTextVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
-VersionInfoDescription={#MyAppName} Setup
+VersionInfoDescription={#MyAppName} Setup with local Vosk STT
 VersionInfoProductName={#MyAppName}
-VersionInfoOriginalFileName=SnapMatch_Setup_v{#MyAppVersion}.exe
+VersionInfoOriginalFileName=SnapMatch_Setup_Vosk_v{#MyAppVersion}.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -67,7 +68,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; ОСНОВНОЙ ИСПОЛНЯЕМЫЙ ФАЙЛ
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\{#MyAppSourceExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 ; ДОКУМЕНТАЦИЯ И ЛИЦЕНЗИЯ
 Source: "installer_info.txt"; DestDir: "{app}"; Flags: ignoreversion
