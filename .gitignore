@@ -40,6 +40,7 @@ pip-wheel-metadata/
 
 # SnapMatch local runtime data
 config.json
+config.json.bak
 config.local.json
 *.local.json
 database.db

@@ -3,6 +3,8 @@
 import json
 import os
 import random
+import shutil
+import tempfile
 from utils.encryption import encryption
 
 SETTINGS_FILE = 'config.json'
@@ -120,6 +122,10 @@ class SettingsManager:
                 "stt_openai_model": "whisper-1",
                 "stt_groq_key": "",
                 "stt_groq_model": "whisper-large-v3",
+                "stt_custom_key": "",
+                "stt_custom_model": "whisper-1",
+                "stt_custom_base_url": "http://localhost:8000/v1",
+                "stt_max_upload_mb": 25,
                 "models": [
                     {
                         "id": "gpt-3.5-turbo",
@@ -204,6 +210,14 @@ class SettingsManager:
             self.settings['stt_groq_key'] = ""
         if 'stt_groq_model' not in self.settings:
             self.settings['stt_groq_model'] = "whisper-large-v3"
+        if 'stt_custom_key' not in self.settings:
+            self.settings['stt_custom_key'] = ""
+        if 'stt_custom_model' not in self.settings:
+            self.settings['stt_custom_model'] = "whisper-1"
+        if 'stt_custom_base_url' not in self.settings:
+            self.settings['stt_custom_base_url'] = "http://localhost:8000/v1"
+        if 'stt_max_upload_mb' not in self.settings:
+            self.settings['stt_max_upload_mb'] = 25
         
         # Инициализируем индекс для round-robin
         self.current_model_index = 0
@@ -373,24 +387,46 @@ class SettingsManager:
             # Расшифровываем настройки при загрузке
             self.settings = encryption.decrypt_config(encrypted_settings)
         except Exception as e:
-            print(f"Ошибка при загрузке настроек: {e}")
-            self.settings = {}
+            backup_file = f"{SETTINGS_FILE}.bak"
+            if os.path.exists(backup_file):
+                try:
+                    with open(backup_file, 'r', encoding='utf-8') as f:
+                        self.settings = encryption.decrypt_config(json.load(f))
+                    print(f"Основной файл настроек повреждён, загружена резервная копия: {e}")
+                    return False
+                except Exception as backup_error:
+                    raise RuntimeError(
+                        f"Не удалось загрузить настройки и резервную копию: {backup_error}"
+                    ) from e
+            raise RuntimeError(f"Не удалось загрузить настройки: {e}") from e
+        return True
 
     def save_settings(self):
+        settings_to_save = dict(self.settings)
+        settings_to_save.pop('system_prompt_history', None)
+        settings_to_save.pop('system_prompt_templates', None)
+        encrypted_settings = encryption.encrypt_config(settings_to_save)
+
+        target = os.path.abspath(SETTINGS_FILE)
+        target_dir = os.path.dirname(target) or os.getcwd()
+        os.makedirs(target_dir, exist_ok=True)
+        temp_path = None
         try:
-            settings_to_save = dict(self.settings)
-            settings_to_save.pop('system_prompt_history', None)
-            settings_to_save.pop('system_prompt_templates', None)
-            # Шифруем настройки перед сохранением
-            encrypted_settings = encryption.encrypt_config(settings_to_save)
-            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            fd, temp_path = tempfile.mkstemp(prefix=".snapmatch-config-", suffix=".tmp", dir=target_dir)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(encrypted_settings, f, indent=4, ensure_ascii=False)
-            
-            # АВТОМАТИЧЕСКИ ОБНОВЛЯЕМ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ после сохранения
-            self._update_global_vars()
-            
-        except Exception as e:
-            print(f"Ошибка при сохранении настроек: {e}")
+                f.flush()
+                os.fsync(f.fileno())
+            if os.path.exists(target):
+                shutil.copy2(target, f"{target}.bak")
+            os.replace(temp_path, target)
+            temp_path = None
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+        self._update_global_vars()
+        return True
 
     def load_system_prompt_templates(self):
         try:

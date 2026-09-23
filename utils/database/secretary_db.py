@@ -159,6 +159,26 @@ class SecretaryDB(BaseDB):
         except Exception as e:
             logger.error("Ошибка mark secretary response lock sent: %s", e)
 
+    def release_response_lock(self, owner_telegram_id: int, chat_id: int, reply_to_message_id: int) -> bool:
+        """Release an unsent claim so a failed delivery can be retried."""
+        try:
+            def operation():
+                self.cursor.execute(
+                    """
+                    DELETE FROM secretary_response_locks
+                    WHERE owner_telegram_id = ? AND chat_id = ? AND reply_to_message_id = ?
+                      AND status = 'claimed'
+                    """,
+                    (owner_telegram_id, chat_id, reply_to_message_id),
+                )
+                self.connection.commit()
+                return self.cursor.rowcount > 0
+
+            return bool(self._run_write(operation))
+        except Exception as e:
+            logger.error("Ошибка release secretary response lock: %s", e)
+            return False
+
     def prune_events(self, owner_telegram_id: Optional[int] = None) -> int:
         try:
             from config.settings import settings_manager
@@ -791,6 +811,26 @@ class SecretaryDB(BaseDB):
             return bool(self._run_write(operation))
         except Exception as e:
             logger.error(f"Ошибка обновления pending secretary-response {pending_id}: {e}")
+            return False
+
+    def transition_pending_response_status(self, pending_id: int, expected: str, status: str) -> bool:
+        """Atomically claim a pending response or move it to another state."""
+        try:
+            def operation():
+                self.cursor.execute(
+                    """
+                    UPDATE secretary_pending_responses
+                    SET status = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = ?
+                    """,
+                    (status, pending_id, expected),
+                )
+                self.connection.commit()
+                return self.cursor.rowcount == 1
+
+            return bool(self._run_write(operation))
+        except Exception as e:
+            logger.error("Ошибка перехода pending secretary-response %s: %s", pending_id, e)
             return False
 
     def add_pending_response(

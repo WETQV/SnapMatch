@@ -2,6 +2,8 @@
 
 SnapMatch - desktop-приложение для управления Telegram-ботом с AI-моделями, MCP-инструментами, голосовой обработкой, историей сообщений и режимом секретаря.
 
+Версия 1.0.4.3 улучшает контроль доступа к MCP-инструментам, надёжность очереди и сохранение настроек. Голосовое распознавание через облачные и совместимые API работает в обычной сборке; локальный Vosk требует отдельной сборки.
+
 ![Главные настройки](docs/screenshots/main-settings.png)
 
 ## Возможности
@@ -30,6 +32,7 @@ python main.py
 
 ## Документация
 
+- [Что изменилось в 1.0.4.3](docs/RELEASE_1.0.4.3.md)
 - [Использование приложения](docs/USAGE.md)
 - [Сборка и релиз](docs/BUILD_AND_RELEASE.md)
 - [Пример MCP-сервера](examples/mcp/README.md)
@@ -50,8 +53,9 @@ Windows:
 
 ```bat
 build.bat
-build_installer.bat
 ```
+
+Для отдельной локальной Vosk-сборки используйте `build_vosk.bat` после добавления модели и FFmpeg.
 
 Linux:
 
@@ -59,7 +63,7 @@ Linux:
 bash build_linux.sh
 ```
 
-Windows installer включает FFmpeg, если `ffmpeg.exe` доступен рядом с проектом во время сборки. Linux `.deb` собирается в GitHub Actions на Ubuntu 24.04 и зависит от системного `ffmpeg`; ручной запуск GUI на отдельной Linux-машине пока не проверялся. Подробности: [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md).
+Обычный Windows installer не включает Vosk и FFmpeg. Для локального распознавания есть отдельный `build_vosk.bat`, которому нужны модель Vosk и FFmpeg. Linux `.deb` собирается в GitHub Actions на Ubuntu 24.04; `ffmpeg` нужен только для локального Vosk. Ручной запуск GUI на отдельной Linux-машине пока не проверялся. Подробности: [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md).
 
 ## Данные и локальные файлы
 

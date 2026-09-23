@@ -9,7 +9,7 @@ from utils.history_manager import reset_history_cache
 from utils import stats
 from utils import server_state
 from config.settings import settings_manager
-from bot.handlers.services.access_control import is_admin_user
+from bot.handlers.services.access_control import can_manage_group_history, is_admin_user
 from bot.handlers.services.telegram_utils import send_ephemeral_reply
 
 logger = setup_logger(__name__)
@@ -52,6 +52,11 @@ async def clear_history_command(message: types.Message):
 
         if user is not None:
             if chat_type in {'group', 'supergroup'}:
+                if not await can_manage_group_history(
+                    settings_manager.get_settings(), user, telegram_id, message.bot, chat_id
+                ):
+                    await send_ephemeral_reply(message, "⛔ Очищать общую историю могут только администраторы группы.")
+                    return
                 # В группе удаляем только обращения к боту и ответы ассистента
                 deleted_count = db.messages.delete_group_conversation(chat_id)
                 success_message = (

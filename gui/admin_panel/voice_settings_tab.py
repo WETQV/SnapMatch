@@ -40,14 +40,15 @@ class VoiceSettingsTab(QWidget):
         stt_form.addRow("Статус:", self.cb_stt_enabled)
 
         self.combo_engine = QComboBox()
-        self.combo_engine.addItems(["vosk", "openai", "groq"])
+        self.combo_engine.addItems(["vosk", "openai", "groq", "custom"])
         self.combo_engine.setCurrentText(settings.get('stt_engine', 'vosk'))
         self.combo_engine.currentTextChanged.connect(self._on_engine_changed)
         self.combo_engine.setToolTip(
             "Выберите движок для распознавания речи:\n"
             "• vosk: Работает полностью локально, требует скачивания модели.\n"
             "• openai: Использует Whisper API от OpenAI. Высокая точность, платно.\n"
-            "• groq: Использует Whisper через Groq API. Очень быстро, есть бесплатные лимиты."
+            "• groq: Использует Whisper через Groq API. Очень быстро, есть бесплатные лимиты.\n"
+            "• custom: Ваш локальный или удалённый OpenAI-совместимый STT endpoint."
         )
         stt_form.addRow("Движок:", self.combo_engine)
 
@@ -66,6 +67,12 @@ class VoiceSettingsTab(QWidget):
         self.le_cloud_model = QLineEdit()
         self.le_cloud_model.setToolTip("Название модели для распознавания (например, whisper-1 для OpenAI или whisper-large-v3 для Groq).")
         cloud_form.addRow("Модель:", self.le_cloud_model)
+
+        self.le_custom_base_url = QLineEdit()
+        self.le_custom_base_url.setPlaceholderText("http://localhost:8000/v1")
+        self.le_custom_base_url.setToolTip("Base URL OpenAI-совместимого сервера; нужен POST /audio/transcriptions.")
+        cloud_form.addRow("Base URL:", self.le_custom_base_url)
+        self.lbl_custom_base_url = cloud_form.labelForField(self.le_custom_base_url)
 
         self.cloud_group.setLayout(cloud_form)
         layout.addWidget(self.cloud_group)
@@ -128,7 +135,10 @@ class VoiceSettingsTab(QWidget):
 
     def _on_engine_changed(self, engine):
         self.vosk_group.setVisible(engine == "vosk")
-        self.cloud_group.setVisible(engine in ["openai", "groq"])
+        self.cloud_group.setVisible(engine in ["openai", "groq", "custom"])
+        self.le_custom_base_url.setVisible(engine == "custom")
+        if self.lbl_custom_base_url:
+            self.lbl_custom_base_url.setVisible(engine == "custom")
         
         settings = settings_manager.get_settings()
         if engine == "openai":
@@ -139,10 +149,16 @@ class VoiceSettingsTab(QWidget):
             self.le_cloud_key.setText(settings.get('stt_groq_key', ''))
             self.le_cloud_model.setText(settings.get('stt_groq_model', 'whisper-large-v3-turbo'))
             self._update_help_text("groq")
+        elif engine == "custom":
+            self.le_cloud_key.setText(settings.get('stt_custom_key', ''))
+            self.le_cloud_model.setText(settings.get('stt_custom_model', 'whisper-1'))
+            self.le_custom_base_url.setText(settings.get('stt_custom_base_url', 'http://localhost:8000/v1'))
+            self._update_help_text("custom")
         else:  # vosk
             self._update_help_text("vosk")
             
-        self._check_ffmpeg()
+        if engine == "vosk":
+            self._check_ffmpeg()
 
     def _update_help_text(self, engine):
         """Обновляет текст справки в зависимости от выбранного движка"""
@@ -176,7 +192,12 @@ class VoiceSettingsTab(QWidget):
                 "• Бесплатные лимиты: 100 минут в день (free tier)\n\n"
                 "Плюсы: очень быстро (189x speed), многоязычный, есть бесплатный лимит\n"
                 "Минусы: требует интернета, лимиты на бесплатном тарифе"
-            )
+            ),
+            "custom": (
+                "Свой STT-сервер — локальный или удалённый интерфейс с OpenAI-совместимым "
+                "POST /audio/transcriptions. Укажите Base URL, имя модели и ключ, если сервер его требует. "
+                "Аудио отправляется напрямую; Vosk и FFmpeg не нужны."
+            ),
         }
         
         self.info_label.setText(help_texts.get(engine, ""))
@@ -203,7 +224,7 @@ class VoiceSettingsTab(QWidget):
             self.lbl_ffmpeg_status.setText("✅ Установлен")
             self.lbl_ffmpeg_status.setStyleSheet("color: #4CAF50;")
         else:
-            self.lbl_ffmpeg_status.setText("❌ Не найден (нужен для ГС и кружочков)")
+            self.lbl_ffmpeg_status.setText("❌ Не найден (нужен только для Vosk)")
             self.lbl_ffmpeg_status.setStyleSheet("color: #F44336;")
 
     def _show_ffmpeg_help(self):
@@ -227,14 +248,6 @@ class VoiceSettingsTab(QWidget):
 
     def _check_model_exists(self):
         path = self.lbl_path.text()
-        # 🆕 Создаем папку, если её нет
-        if not os.path.exists(path):
-            try:
-                os.makedirs(path, exist_ok=True)
-                logger.info(f"Создана директория для моделей: {path}")
-            except Exception as e:
-                logger.error(f"Не удалось создать директорию {path}: {e}")
-
         if os.path.exists(path) and any(os.path.isdir(os.path.join(path, d)) for d in os.listdir(path) if d in ['am', 'graph', 'ivector']):
             self.lbl_model_status.setText("✅ Модель найдена")
             self.lbl_model_status.setStyleSheet("color: #4CAF50;")
@@ -259,7 +272,23 @@ class VoiceSettingsTab(QWidget):
         elif engine == "groq":
             settings['stt_groq_key'] = self.le_cloud_key.text().strip()
             settings['stt_groq_model'] = self.le_cloud_model.text().strip()
+        elif engine == "custom":
+            base_url = self.le_custom_base_url.text().strip().rstrip('/')
+            if not base_url.startswith(('http://', 'https://')):
+                QMessageBox.warning(self, "Ошибка", "Base URL должен начинаться с http:// или https://")
+                return
+            if not self.le_cloud_model.text().strip():
+                QMessageBox.warning(self, "Ошибка", "Укажите имя STT-модели")
+                return
+            settings['stt_custom_key'] = self.le_cloud_key.text().strip()
+            settings['stt_custom_model'] = self.le_cloud_model.text().strip()
+            settings['stt_custom_base_url'] = base_url
 
-        settings_manager.update_settings(**settings)
+        try:
+            settings_manager.update_settings(**settings)
+        except Exception as exc:
+            logger.error("Не удалось сохранить настройки голоса: %s", exc)
+            QMessageBox.warning(self, "Ошибка", "Не удалось сохранить настройки голоса.")
+            return
         logger.info("Настройки голоса сохранены")
         QMessageBox.information(self, "Сохранено", "Настройки голоса сохранены.")

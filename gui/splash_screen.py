@@ -507,7 +507,7 @@ class SplashScreen(QSplashScreen):
         p.setFont(font)
         fm = QFontMetrics(font)
 
-        text = "v1.0.4.0"
+        text = "v1.0.4.3"
         tw = fm.horizontalAdvance(text)
         p.setPen(self._color_with_alpha(self.colors['text_muted'], 0.4 * self.version_opacity))
         p.drawText(cx - tw // 2, h - 18, text)

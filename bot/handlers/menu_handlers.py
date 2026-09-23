@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 
 from bot.handlers.queue_manager import get_model_usage_stats, reload_models
-from bot.handlers.services.access_control import is_admin_user, resolve_user_role
+from bot.handlers.services.access_control import can_manage_group_history, is_admin_user, resolve_user_role
 from bot.handlers.services.mcp_permissions import allowed_tools_for_context
 from bot.handlers.services.mcp_registry import normalize_server_config, preview_servers
 from bot.handlers.services.mcp_runtime import McpRuntimeError, discover_server_capabilities, is_mcp_sdk_available
@@ -648,6 +648,11 @@ async def _clear_history_from_menu(query: types.CallbackQuery, actor: types.User
     try:
         user = db.users.ensure_user(actor.id, actor.username, actor.first_name, actor.last_name)
         if chat.type in {"group", "supergroup"}:
+            if not await can_manage_group_history(
+                settings_manager.get_settings(), user, actor.id, query.bot, chat.id
+            ):
+                await query.answer("Очищать общую историю могут только администраторы группы.", show_alert=True)
+                return
             deleted_count = db.messages.delete_group_conversation(chat.id)
         else:
             deleted_count = db.messages.delete_messages_by_chat_id(chat.id)

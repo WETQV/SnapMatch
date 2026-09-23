@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VERSION="${SNAPMATCH_VERSION:-1.0.4}"
+VERSION="${SNAPMATCH_VERSION:-1.0.4.3}"
 ARCH="${SNAPMATCH_ARCH:-amd64}"
 APP_BINARY="$ROOT_DIR/dist/SnapMatch"
 PACKAGE_ROOT="$ROOT_DIR/dist/deb/snapmatch_${VERSION}_${ARCH}"
@@ -34,7 +34,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: WETQV
-Depends: ffmpeg, libc6, libegl1, libxcb-cursor0, libxkbcommon-x11-0
+Depends: libc6, libegl1, libxcb-cursor0, libxkbcommon-x11-0
 Homepage: https://github.com/WETQV/SnapMatch
 Description: Desktop Telegram bot manager with AI models and MCP tools
  SnapMatch is a desktop application for managing a Telegram bot with AI models,

@@ -674,14 +674,6 @@ async def message_handler(message: types.Message):
 
         user_id = user["id"]
         enqueue_success = False
-        if user_locks.get(user_id, False):
-            logger.debug(
-                "Пользователь %s отправил запрос, но предыдущий ещё обрабатывается",
-                user_id,
-            )
-            return
-
-        user_locks[user_id] = True
 
         user_priority = int(user.get("priority") or 0)
         queue_priority = -user_priority
@@ -712,8 +704,6 @@ async def message_handler(message: types.Message):
 
     except Exception as e:
         logger.error(f"Ошибка при обработке сообщения: {e}")
-        if 'user_id' in locals() and not enqueue_success:
-            user_locks[user_id] = False
     finally:
         db.close()
 

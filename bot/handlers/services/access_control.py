@@ -114,6 +114,24 @@ def is_admin_user(settings: Dict[str, Any], user: Optional[Dict[str, Any]], tele
     return bool(user and int(user.get("priority") or 0) >= 100)
 
 
+async def can_manage_group_history(
+    settings: Dict[str, Any],
+    user: Optional[Dict[str, Any]],
+    telegram_id: int,
+    bot: Any,
+    chat_id: int,
+) -> bool:
+    """Allow SnapMatch admins and Telegram group administrators."""
+    if is_admin_user(settings, user, telegram_id):
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id, telegram_id)
+        status = str(getattr(member, "status", "") or "").lower()
+        return status in {"administrator", "creator", "owner"}
+    except Exception:
+        return False
+
+
 def resolve_user_role(
     settings: Dict[str, Any],
     user: Optional[Dict[str, Any]],

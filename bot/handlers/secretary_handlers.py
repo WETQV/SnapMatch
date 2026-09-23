@@ -45,8 +45,6 @@ def _get_secretary_debounce_manager() -> SecretaryDebounceManager:
 
 
 async def _enqueue_debounced_secretary_batch(batch) -> None:
-    if batch.user and batch.user.get("id") is not None:
-        queue_manager.user_locks[batch.user["id"]] = True
     await enqueue_secretary_batch(
         batch,
         request_queue=queue_manager.request_queue,
@@ -64,6 +62,7 @@ async def close_secretary_handlers() -> None:
 
 async def business_connection_handler(event: types.BusinessConnection):
     db = DatabaseManager()
+    sending_claimed = False
     try:
         owner_id = event.user.id if event.user else None
         if owner_id is None:
@@ -266,7 +265,9 @@ async def secretary_callback_handler(query: types.CallbackQuery):
             return
 
         if action == "cancel":
-            db.secretary.update_pending_response_status(pending_id, "cancelled")
+            if not db.secretary.transition_pending_response_status(pending_id, "pending", "cancelled"):
+                await query.answer("Черновик уже обрабатывается.", show_alert=True)
+                return
             db.secretary.add_event(query.from_user.id, "cancelled", f"pending_id={pending_id}", chat_id=pending.get("chat_id"))
             if query.message:
                 await query.message.edit_text("Черновик отменён.")
@@ -274,9 +275,14 @@ async def secretary_callback_handler(query: types.CallbackQuery):
             return
 
         if action == "send":
+            if not db.secretary.transition_pending_response_status(pending_id, "pending", "sending"):
+                await query.answer("Черновик уже обрабатывается.", show_alert=True)
+                return
+            sending_claimed = True
             response_text = pending.get("response_text") or ""
             if _is_secretary_error_response(response_text):
                 db.secretary.update_pending_response_status(pending_id, "cancelled")
+                sending_claimed = False
                 db.secretary.add_event(
                     query.from_user.id,
                     "error",
@@ -317,7 +323,9 @@ async def secretary_callback_handler(query: types.CallbackQuery):
                         f"sendRichMessage failed for pending_id={pending_id}: {rich_result.reason}",
                         chat_id=pending.get("chat_id"),
                     )
-                    await query.answer("Не удалось отправить Rich Message.", show_alert=True)
+                    db.secretary.transition_pending_response_status(pending_id, "sending", "pending")
+                    sending_claimed = False
+                    await query.answer("Не удалось отправить Rich Message. Черновик можно отправить повторно.", show_alert=True)
                     return
 
                 legacy_text = prepare_legacy_fallback_text(response_text) if pending.get("business_connection_id") else response_text
@@ -330,6 +338,7 @@ async def secretary_callback_handler(query: types.CallbackQuery):
                     reply_to_message_id=pending.get("reply_to_message_id"),
                 )
             db.secretary.update_pending_response_status(pending_id, "sent")
+            sending_claimed = False
             db.secretary.add_event(query.from_user.id, "sent", f"pending_id={pending_id}", chat_id=pending.get("chat_id"))
             if query.message:
                 await query.message.edit_text("Ответ отправлен.")
@@ -337,6 +346,10 @@ async def secretary_callback_handler(query: types.CallbackQuery):
             return
 
         await query.answer("Неизвестное действие.", show_alert=True)
+    except Exception:
+        if sending_claimed:
+            db.secretary.transition_pending_response_status(pending_id, "sending", "pending")
+        raise
     finally:
         db.close()
 

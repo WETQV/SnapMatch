@@ -489,7 +489,19 @@ class McpTab(QWidget):
             QMessageBox.warning(self, "MCP discovery", f"Не удалось проверить сервер: {e}")
             return
 
-        servers[self.current_row]["tools"] = capabilities.get("tools") or []
+        discovered_tools = capabilities.get("tools") or []
+        existing_tools = {
+            str(tool.get("name") or "").strip(): tool
+            for tool in (servers[self.current_row].get("tools") or [])
+            if isinstance(tool, dict) and str(tool.get("name") or "").strip()
+        }
+        for tool in discovered_tools:
+            if not isinstance(tool, dict):
+                continue
+            previous = existing_tools.get(str(tool.get("name") or "").strip())
+            if previous is not None and "requires_confirmation" in previous:
+                tool["requires_confirmation"] = bool(previous.get("requires_confirmation"))
+        servers[self.current_row]["tools"] = discovered_tools
         servers[self.current_row]["resources"] = capabilities.get("resources") or []
         servers[self.current_row]["resource_templates"] = capabilities.get("resource_templates") or []
         servers[self.current_row]["prompts"] = capabilities.get("prompts") or []

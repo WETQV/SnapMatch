@@ -463,7 +463,15 @@ class AdminPanelBase(QMainWindow):
                 return
             self._closing = True
 
-        self._shutdown_runtime()
+        if not self._shutdown_runtime():
+            self._closing = False
+            event.ignore()
+            QMessageBox.warning(
+                self,
+                "Завершение работы",
+                "Фоновые операции ещё завершаются. Подождите немного и закройте приложение повторно.",
+            )
+            return
 
         event.accept()
         app = QApplication.instance()
@@ -480,6 +488,6 @@ class AdminPanelBase(QMainWindow):
 
         if self.bot_thread and self.bot_thread.isRunning():
             if not self.bot_thread.stop_and_wait(30000):
-                logger.warning("BotThread не завершился за 30 секунд, принудительно завершаем поток.")
-                self.bot_thread.terminate()
-                self.bot_thread.wait(3000)
+                logger.warning("BotThread не завершился за 30 секунд; принудительная остановка не выполняется.")
+                return False
+        return True

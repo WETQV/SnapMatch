@@ -2,7 +2,7 @@ import sqlite3
 import threading
 from typing import Set
 
-from config.settings import DATABASE_PATH
+from config.settings import settings_manager
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -11,11 +11,15 @@ logger = setup_logger(__name__)
 class BaseDB:
     _lock = threading.Lock()
     _write_lock = threading.Lock()
+    # Kept for compatibility with the existing maintenance/regression utility.
     _tables_created = False
+    _initialized_databases: Set[str] = set()
 
     def __init__(self):
+        database_path = settings_manager.settings.get('database_path', 'database.db')
+        database_key = str(database_path)
         self.connection = sqlite3.connect(
-            DATABASE_PATH,
+            database_path,
             check_same_thread=False,
             timeout=30.0,
         )
@@ -30,8 +34,11 @@ class BaseDB:
 
         with BaseDB._lock:
             if not BaseDB._tables_created:
+                BaseDB._initialized_databases.clear()
+            if database_key not in BaseDB._initialized_databases:
                 self.create_tables()
-                BaseDB._tables_created = True
+                BaseDB._initialized_databases.add(database_key)
+            BaseDB._tables_created = True
 
     def create_tables(self):
         try:

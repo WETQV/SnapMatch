@@ -16,7 +16,7 @@ SnapMatch - это приложение для управления AI бото�
 • И всем кто хочет удобно взаимодействовать с ИИ через Telegram
 
 Разработчик: WETQV
-Версия: 1.0.4.0
+Версия: 1.0.4.3
 Лицензия: GNU GPL v3
 
 Добро пожаловать в мир удобного взаимодействия с ИИ! 
@@ -43,7 +43,7 @@ For whom:
 - And everyone who wants to conveniently interact with AI via Telegram.
 
 Developer: WETQV
-Version: 1.0.4.0
+Version: 1.0.4.3
 License: GNU GPL v3
 
 Welcome to the world of convenient interaction with AI! 

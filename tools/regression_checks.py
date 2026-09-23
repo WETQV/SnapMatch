@@ -152,10 +152,10 @@ def check_bot_access_policy():
 def check_secretary_db_and_messages():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    old_path = base_db.DATABASE_PATH
+    old_path = settings_manager.settings.get("database_path", "database.db")
     old_created = base_db.BaseDB._tables_created
     try:
-        base_db.DATABASE_PATH = path
+        settings_manager.settings["database_path"] = path
         base_db.BaseDB._tables_created = False
 
         secretary = SecretaryDB()
@@ -258,7 +258,7 @@ def check_secretary_db_and_messages():
         assert {row["role"] for row in secretary_history} == {"user", "assistant"}
         messages.close()
     finally:
-        base_db.DATABASE_PATH = old_path
+        settings_manager.settings["database_path"] = old_path
         base_db.BaseDB._tables_created = old_created
         try:
             os.remove(path)
@@ -269,10 +269,10 @@ def check_secretary_db_and_messages():
 def check_group_chat_migration():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    old_path = base_db.DATABASE_PATH
+    old_path = settings_manager.settings.get("database_path", "database.db")
     old_created = base_db.BaseDB._tables_created
     try:
-        base_db.DATABASE_PATH = path
+        settings_manager.settings["database_path"] = path
         base_db.BaseDB._tables_created = False
         messages = MessageDB()
         messages.cursor.execute(
@@ -320,7 +320,7 @@ def check_group_chat_migration():
         assert all(row["chat_type"] == "supergroup" for row in history)
         messages.close()
     finally:
-        base_db.DATABASE_PATH = old_path
+        settings_manager.settings["database_path"] = old_path
         base_db.BaseDB._tables_created = old_created
         try:
             os.remove(path)
@@ -352,7 +352,7 @@ def check_audit_retention():
 
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    old_path = base_db.DATABASE_PATH
+    old_path = settings_manager.settings.get("database_path", "database.db")
     old_created = base_db.BaseDB._tables_created
     old_retention = dict(settings_manager.settings.get("audit_retention", {}) or {})
     try:
@@ -364,7 +364,7 @@ def check_audit_retention():
             "mcp_access_audit_days": 0,
             "mcp_access_audit_max": 2,
         }
-        base_db.DATABASE_PATH = path
+        settings_manager.settings["database_path"] = path
         base_db.BaseDB._tables_created = False
 
         secretary = SecretaryDB()
@@ -386,7 +386,7 @@ def check_audit_retention():
         mcp.close()
     finally:
         settings_manager.settings["audit_retention"] = old_retention
-        base_db.DATABASE_PATH = old_path
+        settings_manager.settings["database_path"] = old_path
         base_db.BaseDB._tables_created = old_created
         try:
             os.remove(path)
