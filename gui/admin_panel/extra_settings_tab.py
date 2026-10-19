@@ -230,7 +230,25 @@ class ExtraSettingsTab(QWidget):
 
         self.setLayout(layout)
 
+        # Подпункты Rich доступны только при включённом «Rich Messages»
+        self.cb_rich_messages.toggled.connect(self._update_rich_controls)
+        self._update_rich_controls(self.cb_rich_messages.isChecked())
+
+    def _update_rich_controls(self, enabled):
+        for widget in (self.rich_format_combo, self.cb_rich_fallback, self.cb_rich_streaming):
+            widget.setEnabled(bool(enabled))
+
     def save_settings(self):
+        ctx_txt = self.le_ctx_len.text().strip()
+        ctx_value = 4096
+        if ctx_txt:
+            try:
+                ctx_value = int(ctx_txt)
+            except ValueError:
+                ctx_value = 0
+            if ctx_value < 1024:
+                QMessageBox.warning(self, "Окно контекста", "Окно контекста должно быть целым числом не меньше 1024. Настройки не сохранены.")
+                return
         settings = settings_manager.get_settings()
         settings['chat_system_notifications'] = self.cb_sys_notify.isChecked()
         settings['format_markdown'] = self.cb_md.isChecked()
@@ -243,11 +261,7 @@ class ExtraSettingsTab(QWidget):
             'streaming_enabled': self.cb_rich_streaming.isChecked(),
         }
 
-        ctx_txt = self.le_ctx_len.text().strip()
-        try:
-            settings['default_context_length'] = max(1024, int(ctx_txt)) if ctx_txt else 4096
-        except ValueError:
-            settings['default_context_length'] = 4096
+        settings['default_context_length'] = ctx_value
 
         settings['group_parallel_mode'] = self.cb_group_parallel.isChecked()
         settings['respond_only_on_mention'] = self.cb_mention_only.isChecked()
@@ -265,7 +279,12 @@ class ExtraSettingsTab(QWidget):
         settings['stt_annotate'] = self.cb_stt_annotate.isChecked()
         settings['stream_mode'] = self.cb_stream_draft.isChecked()
 
-        settings_manager.update_settings(**settings)
+        try:
+            settings_manager.update_settings(**settings)
+        except Exception as exc:
+            logger.error("Не удалось сохранить дополнительные настройки: %s", exc)
+            QMessageBox.warning(self, "Ошибка", "Не удалось сохранить дополнительные настройки.")
+            return
         logger.info("Дополнительные настройки сохранены")
 
         # Применяем тему OLED если нужно
