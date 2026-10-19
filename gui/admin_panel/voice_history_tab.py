@@ -2,19 +2,20 @@
 """Вкладка «История расшифровок»: что и когда распознал STT, каким движком и с каким результатом."""
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QPlainTextEdit, QSplitter, QMessageBox, QApplication,
 )
 from PyQt6.QtCore import Qt, QTimer
 
 from gui.async_worker import run_in_background
+from gui.design import FxComboBox, StatusBadge, card, icon_button, label, make_table, page_header
 from utils.database.database_manager import DatabaseManager
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 STATUS_LABELS = {"ok": "Готово", "empty": "Пусто", "error": "Ошибка"}
+STATUS_KINDS = {"ok": "ok", "empty": "warn", "error": "error"}
 MEDIA_LABELS = {"voice": "Голосовое", "video_note": "Кружок"}
 REFRESH_MS = 4000
 ROW_LIMIT = 300
@@ -52,57 +53,66 @@ class VoiceHistoryTab(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(16)
 
-        bar = QHBoxLayout()
-        bar.addWidget(QLabel("Статус:"))
-        self.status_filter = QComboBox()
+        # Шапка: фильтр статуса, счётчик и кнопки
+        self.status_filter = FxComboBox()
         self.status_filter.addItem("Все", None)
-        for key, label in STATUS_LABELS.items():
-            self.status_filter.addItem(label, key)
+        for key, text in STATUS_LABELS.items():
+            self.status_filter.addItem(text, key)
+        self.status_filter.setMinimumWidth(120)
+        self.status_filter.setToolTip("Фильтр по статусу\nПоказывать только расшифровки с выбранным результатом.")
         self.status_filter.currentIndexChanged.connect(self.refresh)
-        bar.addWidget(self.status_filter)
-        bar.addStretch()
-        self.count_label = QLabel("")
-        self.count_label.setStyleSheet("color: #888; font-size: 11px")
-        bar.addWidget(self.count_label)
-        refresh_btn = QPushButton("Обновить")
+        self.count_label = label("", "muted")
+        refresh_btn = icon_button("Обновить", "mdi6.refresh")
+        refresh_btn.setToolTip("Обновить\nЗагрузить список заново. Открытая вкладка обновляется сама раз в 4 секунды.")
         refresh_btn.clicked.connect(self.refresh)
-        bar.addWidget(refresh_btn)
-        clear_btn = QPushButton("Очистить историю")
+        clear_btn = icon_button("Очистить историю", "mdi6.trash-can-outline", "danger")
+        clear_btn.setToolTip("Очистить историю\nУдаляет все записи расшифровок. Сообщения в чатах не затрагиваются.")
         clear_btn.clicked.connect(self._confirm_clear)
-        bar.addWidget(clear_btn)
-        layout.addLayout(bar)
+        layout.addLayout(page_header("Расшифровки", "Результаты распознавания голосовых и кружочков", refresh_btn, clear_btn))
+
+        # Строка фильтра под шапкой
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(label("СТАТУС", "sectionLabel"))
+        filter_row.addWidget(self.status_filter)
+        filter_row.addSpacing(8)
+        filter_row.addWidget(self.count_label)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
-        self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        splitter.setChildrenCollapsible(False)
+        self.table = make_table(self.COLUMNS)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(len(self.COLUMNS) - 1, QHeaderView.ResizeMode.Stretch)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)   # StatusBadge шире текста пустой ячейки
+        self.table.setColumnWidth(5, 116)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.verticalHeader().setVisible(False)
+        self.table.setMinimumHeight(160)
         self.table.itemSelectionChanged.connect(self._show_details)
         splitter.addWidget(self.table)
 
-        detail_box = QWidget()
-        detail_layout = QVBoxLayout(detail_box)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_box, detail_layout = card()
         detail_head = QHBoxLayout()
-        detail_head.addWidget(QLabel("Полный текст выбранной расшифровки:"))
+        detail_head.addWidget(label("Полный текст", "h2"))
+        detail_head.addWidget(label("выбранной расшифровки", "muted"))
         detail_head.addStretch()
-        copy_btn = QPushButton("Копировать")
+        copy_btn = icon_button("Копировать", "mdi6.content-copy")
+        copy_btn.setToolTip("Копировать\nКладёт полный текст выбранной расшифровки в буфер обмена.")
         copy_btn.clicked.connect(self._copy_details)
         detail_head.addWidget(copy_btn)
         detail_layout.addLayout(detail_head)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
+        self.details.setMinimumHeight(70)
         detail_layout.addWidget(self.details)
         splitter.addWidget(detail_box)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)
 
     # ── Данные ────────────────────────────────────────────────
 
@@ -143,23 +153,31 @@ class VoiceHistoryTab(QWidget):
                 user = r.get("author_username") or r.get("author_telegram_id") or "—"
                 duration = r.get("duration_sec")
                 body = r.get("error") if r["status"] == "error" else (r.get("text") or "")
+                created = str(r.get("created_at") or "")
                 cells = [
-                    str(r.get("created_at") or ""),
+                    created[5:16] if len(created) >= 16 else created,   # «ММ-ДД ЧЧ:ММ», полное время — в подсказке
                     str(user),
                     MEDIA_LABELS.get(r.get("media_type"), r.get("media_type") or ""),
                     r.get("engine") or "",
                     "" if duration is None else f"{duration:g}",
-                    STATUS_LABELS.get(r["status"], r["status"]),
+                    "",  # колонка статуса: вместо текста — StatusBadge
                     " ".join(str(body).split())[:300],
                 ]
                 for col, value in enumerate(cells):
                     item = QTableWidgetItem(value)
                     if col == 0:
                         item.setData(Qt.ItemDataRole.UserRole, r["id"])
+                        item.setToolTip(created)
                     self.table.setItem(i, col, item)
-                if r["status"] == "error":
-                    for col in range(len(cells)):
-                        self.table.item(i, col).setForeground(Qt.GlobalColor.red)
+                holder = QWidget()
+                holder.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # клик выделяет строку
+                hl = QHBoxLayout(holder)
+                hl.setContentsMargins(6, 0, 6, 0)
+                hl.addWidget(
+                    StatusBadge(STATUS_LABELS.get(r["status"], r["status"]), STATUS_KINDS.get(r["status"], "idle"), pulse=False),
+                    0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                )
+                self.table.setCellWidget(i, 5, holder)
         finally:
             self.table.setUpdatesEnabled(True)
 

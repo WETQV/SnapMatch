@@ -2,11 +2,12 @@
 
 import os
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
-    QGroupBox, QFormLayout, QCheckBox, QComboBox, QLabel, QMessageBox, QFileDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QMessageBox, QFileDialog, QSizePolicy,
 )
 from PyQt6.QtCore import Qt
 from config.settings import settings_manager
+from gui.admin_panel.ui_common import BadgeSlot, field, vertical_scroll
+from gui.design import FxButton, FxComboBox, SwitchRow, card, label, page_header, primary
 from utils.logger import setup_logger
 from utils.voice_processor import resolve_ffmpeg_path
 
@@ -21,121 +22,133 @@ class VoiceSettingsTab(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout()
-
-        # Верхняя панель с кнопкой сохранения
-        top_bar = QHBoxLayout()
-        save_btn_top = QPushButton("Сохранить настройки голоса")
-        save_btn_top.clicked.connect(self.save_settings)
-        top_bar.addStretch()
-        top_bar.addWidget(save_btn_top)
-        layout.addLayout(top_bar)
-
         settings = settings_manager.get_settings()
 
-        # Группа основных настроек STT
-        stt_group = QGroupBox("Распознавание речи (STT)")
-        stt_form = QFormLayout()
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(16)
 
-        self.cb_stt_enabled = QCheckBox("Включить поддержку голосовых и кружочков")
-        self.cb_stt_enabled.setChecked(settings.get('stt_enabled', False))
-        self.cb_stt_enabled.setToolTip("Включает или выключает обработку голосовых сообщений и кружочков ботом.")
-        stt_form.addRow("Статус:", self.cb_stt_enabled)
+        # Заголовок экрана с кнопкой сохранения
+        save_btn_top = primary("Сохранить", "mdi6.content-save-outline")
+        save_btn_top.setToolTip("Сохранить настройки голоса\nЗаписывает движок, ключи, модель и путь к модели Vosk.")
+        save_btn_top.clicked.connect(self.save_settings)
+        layout.addLayout(page_header("Голос", "Распознавание голосовых сообщений и кружочков", save_btn_top))
 
-        self.combo_engine = QComboBox()
+        # Карточка основных настроек STT
+        self.stt_group, stt_lay = card()
+        stt_lay.addWidget(label("Распознавание речи (STT)", "h2"))
+
+        self.cb_stt_enabled = SwitchRow("Включить поддержку голосовых и кружочков", settings.get('stt_enabled', False))
+        self.cb_stt_enabled.setToolTip(
+            "Поддержка голосовых\nВключает или выключает обработку голосовых сообщений и кружочков ботом."
+        )
+        stt_lay.addWidget(self.cb_stt_enabled)
+
+        self.combo_engine = FxComboBox()
         self.combo_engine.addItems(["vosk", "openai", "groq", "custom"])
         self.combo_engine.setCurrentText(settings.get('stt_engine', 'vosk'))
         self.combo_engine.currentTextChanged.connect(self._on_engine_changed)
         self.combo_engine.setToolTip(
+            "Движок распознавания\n"
             "Выберите движок для распознавания речи:\n"
             "• vosk: Работает полностью локально, требует скачивания модели.\n"
             "• openai: Использует Whisper API от OpenAI. Высокая точность, платно.\n"
             "• groq: Использует Whisper через Groq API. Очень быстро, есть бесплатные лимиты.\n"
             "• custom: Ваш локальный или удалённый OpenAI-совместимый STT endpoint."
         )
-        stt_form.addRow("Движок:", self.combo_engine)
+        stt_lay.addLayout(field("ДВИЖОК", self.combo_engine))
+        layout.addWidget(self.stt_group)
 
-        stt_group.setLayout(stt_form)
-        layout.addWidget(stt_group)
-
-        # Группа для облачных решений (OpenAI / Groq)
-        self.cloud_group = QGroupBox("Настройки облачного STT")
-        cloud_form = QFormLayout()
+        # Карточка облачных решений (OpenAI / Groq / custom)
+        self.cloud_group, cloud_lay = card()
+        cloud_lay.addWidget(label("Настройки облачного STT", "h2"))
 
         self.le_cloud_key = QLineEdit()
         self.le_cloud_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.le_cloud_key.setToolTip("API ключ для выбранного облачного сервиса.")
-        cloud_form.addRow("API Ключ:", self.le_cloud_key)
+        self.le_cloud_key.setToolTip("API ключ\nКлюч для выбранного облачного сервиса.")
+        cloud_lay.addLayout(field("API КЛЮЧ", self.le_cloud_key))
 
         self.le_cloud_model = QLineEdit()
-        self.le_cloud_model.setToolTip("Название модели для распознавания (например, whisper-1 для OpenAI или whisper-large-v3 для Groq).")
-        cloud_form.addRow("Модель:", self.le_cloud_model)
+        self.le_cloud_model.setToolTip(
+            "Модель\nНазвание модели для распознавания (например, whisper-1 для OpenAI или whisper-large-v3 для Groq)."
+        )
+        cloud_lay.addLayout(field("МОДЕЛЬ", self.le_cloud_model))
 
         self.le_custom_base_url = QLineEdit()
         self.le_custom_base_url.setPlaceholderText("http://localhost:8000/v1")
-        self.le_custom_base_url.setToolTip("Base URL OpenAI-совместимого сервера; нужен POST /audio/transcriptions.")
-        cloud_form.addRow("Base URL:", self.le_custom_base_url)
-        self.lbl_custom_base_url = cloud_form.labelForField(self.le_custom_base_url)
-
-        self.cloud_group.setLayout(cloud_form)
+        self.le_custom_base_url.setToolTip("Base URL\nOpenAI-совместимого сервера; нужен POST /audio/transcriptions.")
+        self.le_custom_base_url.setObjectName("mono")
+        self.lbl_custom_base_url = label("BASE URL", "sectionLabel")
+        cloud_lay.addWidget(self.lbl_custom_base_url)
+        cloud_lay.addWidget(self.le_custom_base_url)
         layout.addWidget(self.cloud_group)
 
-        # Группа для локального Vosk
-        self.vosk_group = QGroupBox("Настройки Vosk (Локально)")
-        vosk_form = QFormLayout()
+        # Карточка локального Vosk
+        self.vosk_group, vosk_lay = card()
+        vosk_lay.addWidget(label("Настройки Vosk (локально)", "h2"))
 
-        # 🆕 Проверка FFmpeg
-        self.lbl_ffmpeg_status = QLabel("Проверка FFmpeg...")
-        ffmpeg_layout = QHBoxLayout()
-        ffmpeg_layout.addWidget(self.lbl_ffmpeg_status, 1)
-        btn_ffmpeg_help = QPushButton("Как установить FFmpeg")
-        btn_ffmpeg_help.setToolTip("Подсказка по установке FFmpeg для вашей системы.")
+        # Проверка FFmpeg: статус — бейдж, а не текст с галочкой
+        self.lbl_ffmpeg_status = BadgeSlot("Проверка FFmpeg...", "idle")
+        ffmpeg_row = QHBoxLayout()
+        ffmpeg_row.addWidget(self.lbl_ffmpeg_status)
+        ffmpeg_row.addStretch()
+        btn_ffmpeg_help = FxButton("Как установить FFmpeg")
+        btn_ffmpeg_help.setToolTip("Установка FFmpeg\nПодсказка по установке FFmpeg для вашей системы.")
         btn_ffmpeg_help.clicked.connect(self._show_ffmpeg_help)
-        ffmpeg_layout.addWidget(btn_ffmpeg_help)
-        vosk_form.addRow("Статус FFmpeg:", ffmpeg_layout)
+        ffmpeg_row.addWidget(btn_ffmpeg_help)
+        vosk_lay.addWidget(label("СТАТУС FFMPEG", "sectionLabel"))
+        vosk_lay.addLayout(ffmpeg_row)
 
-        self.lbl_model_status = QLabel("Проверка модели...")
-        btn_download = QPushButton("Скачать модели")
-        btn_download.setFixedWidth(150)
-        btn_download.setToolTip("Перейти на сайт alphacephei.com для выбора и загрузки моделей Vosk.")
+        self.lbl_model_status = BadgeSlot("Проверка модели...", "idle")
+        btn_download = FxButton("Скачать модели")
+        btn_download.setToolTip("Скачать модели\nПерейти на сайт alphacephei.com для выбора и загрузки моделей Vosk.")
         btn_download.clicked.connect(self._download_vosk_models)
-        
-        model_status_layout = QHBoxLayout()
-        model_status_layout.addWidget(self.lbl_model_status)
-        model_status_layout.addStretch()
-        model_status_layout.addWidget(btn_download)
-        vosk_form.addRow("Статус модели:", model_status_layout)
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.lbl_model_status)
+        model_row.addStretch()
+        model_row.addWidget(btn_download)
+        vosk_lay.addWidget(label("СТАТУС МОДЕЛИ", "sectionLabel"))
+        vosk_lay.addLayout(model_row)
 
-        path_layout = QHBoxLayout()
+        path_row = QHBoxLayout()
         self.lbl_path = QLabel(settings.get('stt_model_path', 'assets/models/stt/vosk'))
-        btn_browse = QPushButton("Обзор...")
+        self.lbl_path.setObjectName("mono")
+        # Длинный путь не должен растягивать окно: метка сжимается, полный путь — в подсказке
+        self.lbl_path.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.lbl_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_path.setToolTip(self.lbl_path.text())
+        btn_browse = FxButton("Обзор...")
+        btn_browse.setToolTip("Папка модели\nВыберите каталог распакованной модели Vosk.")
         btn_browse.clicked.connect(self._browse_model_path)
-        path_layout.addWidget(self.lbl_path, 1)
-        path_layout.addWidget(btn_browse)
-        vosk_form.addRow("Путь к модели:", path_layout)
+        path_row.addWidget(self.lbl_path, 1)
+        path_row.addWidget(btn_browse)
+        vosk_lay.addWidget(label("ПУТЬ К МОДЕЛИ", "sectionLabel"))
+        vosk_lay.addLayout(path_row)
 
-        btn_refresh = QPushButton("Проверить наличие модели")
-        btn_refresh.setFixedWidth(200)
-        btn_refresh.setToolTip("Запустить повторную проверку файлов модели в указанной папке.")
+        btn_refresh = FxButton("Проверить наличие модели")
+        btn_refresh.setToolTip("Проверить модель\nЗапустить повторную проверку файлов модели в указанной папке.")
         btn_refresh.clicked.connect(self._check_model_exists)
-        vosk_form.addRow("", btn_refresh)
-
-        self.vosk_group.setLayout(vosk_form)
+        refresh_row = QHBoxLayout()
+        refresh_row.addWidget(btn_refresh)
+        refresh_row.addStretch()
+        vosk_lay.addLayout(refresh_row)
         layout.addWidget(self.vosk_group)
 
-        # Инфо-панель
-        self.info_group = QGroupBox("Справка")
-        self.info_layout = QVBoxLayout()
-        self.info_label = QLabel()
+        # Справка
+        self.info_group, info_lay = card()
+        info_lay.addWidget(label("Справка", "h2"))
+        self.info_label = label("", "muted")
         self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("color: #888888; font-size: 11px;")
-        self.info_layout.addWidget(self.info_label)
-        self.info_group.setLayout(self.info_layout)
+        self.info_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        info_lay.addWidget(self.info_label)
         layout.addWidget(self.info_group)
 
         layout.addStretch()
-        self.setLayout(layout)
-        
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(vertical_scroll(content))
+
         # Начальное обновление видимости и справки
         self._on_engine_changed(self.combo_engine.currentText())
         self._check_model_exists()
@@ -246,11 +259,9 @@ class VoiceSettingsTab(QWidget):
     def _check_ffmpeg(self):
         ffmpeg_path = resolve_ffmpeg_path()
         if ffmpeg_path:
-            self.lbl_ffmpeg_status.setText("✅ Установлен")
-            self.lbl_ffmpeg_status.setStyleSheet("color: #4CAF50;")
+            self.lbl_ffmpeg_status.set("Установлен", "ok")
         else:
-            self.lbl_ffmpeg_status.setText("❌ Не найден (нужен только для Vosk)")
-            self.lbl_ffmpeg_status.setStyleSheet("color: #F44336;")
+            self.lbl_ffmpeg_status.set("Не найден (нужен только для Vosk)", "error")
 
     def _show_ffmpeg_help(self):
         import sys
@@ -282,19 +293,17 @@ class VoiceSettingsTab(QWidget):
         dir_path = QFileDialog.getExistingDirectory(self, "Выберите папку с моделью Vosk", self.lbl_path.text())
         if dir_path:
             self.lbl_path.setText(dir_path)
+            self.lbl_path.setToolTip(dir_path)
             self._check_model_exists()
 
     def _check_model_exists(self):
         path = self.lbl_path.text()
         if os.path.exists(path) and any(os.path.isdir(os.path.join(path, d)) for d in os.listdir(path) if d in ['am', 'graph', 'ivector']):
-            self.lbl_model_status.setText("✅ Модель найдена")
-            self.lbl_model_status.setStyleSheet("color: #4CAF50;")
+            self.lbl_model_status.set("Модель найдена", "ok")
         elif os.path.exists(os.path.join(path, "am")): # упрощенная проверка
-            self.lbl_model_status.setText("✅ Модель найдена")
-            self.lbl_model_status.setStyleSheet("color: #4CAF50;")
+            self.lbl_model_status.set("Модель найдена", "ok")
         else:
-            self.lbl_model_status.setText("❌ Модель не найдена или неверная структура")
-            self.lbl_model_status.setStyleSheet("color: #F44336;")
+            self.lbl_model_status.set("Модель не найдена или неверная структура", "error")
 
     def save_settings(self):
         settings = settings_manager.get_settings()

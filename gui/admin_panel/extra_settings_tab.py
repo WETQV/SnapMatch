@@ -1,11 +1,11 @@
 # gui/admin_panel/extra_settings_tab.py
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QGroupBox, QFormLayout, QCheckBox, QComboBox, QLineEdit, QMessageBox, QScrollArea, QFrame
-)
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QMessageBox, QScrollArea, QFrame
+from PyQt6.QtCore import Qt
 
 from config.settings import settings_manager
+from gui.admin_panel.ui_common import field
+from gui.design import FxComboBox, SwitchRow, card, label, page_header, primary
 from gui.design.appearance import AppearanceCard
 from utils.logger import setup_logger
 
@@ -17,210 +17,229 @@ class ExtraSettingsTab(QWidget):
         super().__init__(parent)
         self._init_ui()
 
+    @staticmethod
+    def _group(title: str, hint: str = ""):
+        """Карточка-группа с заголовком (и необязательной пояснительной строкой)."""
+        box, lay = card()
+        lay.addWidget(label(title, "h2"))
+        if hint:
+            note = label(hint, "muted")
+            note.setWordWrap(True)
+            lay.addWidget(note)
+        return box, lay
+
     def _init_ui(self):
         layout = QVBoxLayout()
+        # Правое поле 24: минимальная ширина AppearanceCard (674) иначе не влезает в 960x720 с полосой прокрутки
+        layout.setContentsMargins(28, 24, 24, 24)
+        layout.setSpacing(16)
 
-        # Верхняя панель с кнопкой сохранения (чтобы не тянуться далеко)
-        top_bar = QHBoxLayout()
-        save_btn_top = QPushButton("Сохранить")
+        # Заголовок с кнопкой сохранения (чтобы не тянуться далеко)
+        save_btn_top = primary("Сохранить", "mdi6.content-save-outline")
+        save_btn_top.setToolTip("Сохранить\nЗаписывает все дополнительные настройки. Текущие процессы не прерываются.")
         save_btn_top.clicked.connect(self.save_settings)
-        top_bar.addStretch()
-        top_bar.addWidget(save_btn_top)
-        layout.addLayout(top_bar)
+        layout.addLayout(page_header("Доп. настройки", "Поведение бота в чатах, форматирование ответов и политика ботов", save_btn_top))
 
         # Оформление (тема, акцент, рамка, анимации): применяется сразу и сохраняется само
         layout.addWidget(AppearanceCard(notify=self._notify))
 
         settings = settings_manager.get_settings()
 
-        group = QGroupBox("Дополнительные настройки")
-        form = QFormLayout()
-
-        # Системные уведомления в чате
-        self.cb_sys_notify = QCheckBox("Показывать системные уведомления в чате")
-        self.cb_sys_notify.setChecked(settings.get('chat_system_notifications', True))
-        self.cb_sys_notify.setToolTip(
-            "Показывать пользователю служебные уведомления (например, предупреждения о переполнении контекста).\n"
-            "Отключите для чистого UX."
-        )
-        form.addRow("Системные уведомления:", self.cb_sys_notify)
-
-        # Форматирование текста
-        self.cb_md = QCheckBox("Включить MarkdownV2")
-        self.cb_md.setChecked(settings.get('format_markdown', True))
+        # ── Форматирование ответов ──
+        fmt_box, fmt = self._group("Форматирование ответов")
+        self.cb_md = SwitchRow("Включить MarkdownV2", settings.get('format_markdown', True))
         self.cb_md.setToolTip(
-            "Разрешить отправку ответов с форматированием MarkdownV2."
+            "MarkdownV2\n"
+            "Разрешить отправку ответов с форматированием MarkdownV2. "
             "При ошибках форматирования будет выполнена авто-конвертация в HTML или обычный текст."
         )
-        self.cb_html = QCheckBox("Включить HTML")
-        self.cb_html.setChecked(settings.get('format_html', True))
+        self.cb_html = SwitchRow("Включить HTML", settings.get('format_html', True))
         self.cb_html.setToolTip(
-            "Разрешить HTML-форматирование ответов."
+            "HTML\n"
+            "Разрешить HTML-форматирование ответов. "
             "Если отключено, сообщения будут отправляться как обычный текст."
         )
-        form.addRow("Форматирование:", self.cb_md)
-        form.addRow(" ", self.cb_html)
+        fmt.addWidget(self.cb_md)
+        fmt.addWidget(self.cb_html)
+        layout.addWidget(fmt_box)
 
+        # ── Rich-сообщения ──
         rich_settings = settings.get('rich_messages') or {}
-        self.cb_rich_messages = QCheckBox("Включить Telegram Rich Messages")
-        self.cb_rich_messages.setChecked(bool(rich_settings.get('enabled', False)))
+        rich_box, rich = self._group("Rich-сообщения", "Подпункты доступны, пока Rich Messages включены.")
+        self.cb_rich_messages = SwitchRow("Включить Telegram Rich Messages", bool(rich_settings.get('enabled', False)))
         self.cb_rich_messages.setToolTip(
+            "Rich Messages\n"
             "Отправлять финальные ответы через Bot API sendRichMessage.\n"
             "Даёт расширенное форматирование и лимит до 32768 UTF-8 символов.\n\n"
             "Если выключено, бот использует старый путь sendMessage с MarkdownV2/HTML."
         )
-        form.addRow("Rich Messages:", self.cb_rich_messages)
+        rich.addWidget(self.cb_rich_messages)
 
-        self.rich_format_combo = QComboBox()
+        self.rich_format_combo = FxComboBox()
         self.rich_format_combo.addItems(["markdown", "html"])
         rich_format = str(rich_settings.get('format', 'markdown') or 'markdown')
         index = self.rich_format_combo.findText(rich_format)
         self.rich_format_combo.setCurrentIndex(index if index >= 0 else 0)
         self.rich_format_combo.setToolTip(
-            "Формат Rich Message.\n"
+            "Формат Rich Message\n"
             "markdown лучше подходит для ответов LLM.\n"
             "html можно использовать, если промпты стабильно возвращают rich HTML."
         )
-        form.addRow(" ", self.rich_format_combo)
+        self._rich_format_field = QWidget()
+        rf = QVBoxLayout(self._rich_format_field)
+        rf.setContentsMargins(0, 0, 0, 0)
+        rf.addLayout(field("ФОРМАТ", self.rich_format_combo))
+        rich.addWidget(self._rich_format_field)
 
-        self.cb_rich_fallback = QCheckBox("При ошибке Rich Messages отправлять старым способом")
-        self.cb_rich_fallback.setChecked(bool(rich_settings.get('fallback_to_legacy', True)))
+        self.cb_rich_fallback = SwitchRow(
+            "При ошибке Rich Messages отправлять старым способом", bool(rich_settings.get('fallback_to_legacy', True))
+        )
         self.cb_rich_fallback.setToolTip(
+            "Откат на sendMessage\n"
             "Если Telegram отклонит sendRichMessage или ответ превысит rich-лимит,\n"
             "бот отправит сообщение через старый sendMessage с разбиением по 4096 символов."
         )
-        form.addRow(" ", self.cb_rich_fallback)
+        rich.addWidget(self.cb_rich_fallback)
 
-        self.cb_rich_streaming = QCheckBox("Использовать Rich Draft для плавного стриминга")
-        self.cb_rich_streaming.setChecked(bool(rich_settings.get('streaming_enabled', True)))
+        self.cb_rich_streaming = SwitchRow(
+            "Использовать Rich Draft для плавного стриминга", bool(rich_settings.get('streaming_enabled', True))
+        )
         self.cb_rich_streaming.setToolTip(
+            "Rich Draft\n"
             "Когда включены Rich Messages и общий стриминг, бот использует Bot API sendRichMessageDraft:\n"
             "частичный rich-preview во время генерации + финальный sendRichMessage.\n\n"
             "Работает только в личных чатах с ботом. В группах и режиме секретаря используется fallback."
         )
-        form.addRow(" ", self.cb_rich_streaming)
+        rich.addWidget(self.cb_rich_streaming)
+        layout.addWidget(rich_box)
 
-        # Окно контекста (токенов) по умолчанию
-        self.le_ctx_len = QLineEdit()
-        self.le_ctx_len.setPlaceholderText("4096")
-        self.le_ctx_len.setToolTip(
-            "Размер окна контекста по умолчанию (в токенах). Используется как fallback для моделей, если не указан context_window_size.\n"
-            "Каждая модель может иметь свой размер контекста — смотрите настройки при добавлении модели.\n"
-            "Примеры: 4096, 8192, 16384. Убедитесь, что система достаточно мощна для работы с большими значениями."
-        )
-        ctx = settings.get('default_context_length', 4096)
-        self.le_ctx_len.setText(str(ctx))
-        form.addRow("Окно контекста по умолчанию (токены):", self.le_ctx_len)
-
-        # 🆕 Режим обработки группы
-        self.cb_group_parallel = QCheckBox("Отвечать на все запросы одновременно")
-        self.cb_group_parallel.setChecked(settings.get('group_parallel_mode', False))
-        # 🆕 Режим обработки обращений в группах
-        self.cb_mention_only = QCheckBox("Реагировать только на @упоминания")
-        self.cb_mention_only.setChecked(settings.get('respond_only_on_mention', False))
+        # ── Поведение в чатах ──
+        beh_box, beh = self._group("Поведение в чатах")
+        self.cb_mention_only = SwitchRow("Реагировать только на @упоминания", settings.get('respond_only_on_mention', False))
         self.cb_mention_only.setToolTip(
+            "Фильтр обращений\n"
             "Если включено, бот в группах реагирует только на сообщения с прямым упоминанием (@бот).\n"
             "Ответы на собственные сообщения бота игнорируются, чтобы не плодить случайные триггеры."
         )
-        form.addRow("Фильтр обращений:", self.cb_mention_only)
-
-        self.cb_reject_empty_mentions = QCheckBox("Требовать текст при упоминании")
-        self.cb_reject_empty_mentions.setChecked(settings.get('reject_empty_mentions', True))
+        self.cb_reject_empty_mentions = SwitchRow("Требовать текст при упоминании", settings.get('reject_empty_mentions', True))
         self.cb_reject_empty_mentions.setToolTip(
+            "Текст при упоминании\n"
             "Когда включено, бот просит добавить текст, если сообщение содержит лишь пустое упоминание.\n"
             "Полезно, чтобы пользователи не спамили пустыми тегами."
         )
-        form.addRow(" ", self.cb_reject_empty_mentions)
+        self.cb_group_parallel = SwitchRow("Отвечать на все запросы в группах одновременно", settings.get('group_parallel_mode', False))
+        self.cb_group_parallel.setToolTip(
+            "Режим обработки в группах\n"
+            "Поведение бота в групповых чатах:\n\n"
+            "ВКЛЮЧЕНО (параллельно):\n"
+            "Бот отвечает на несколько запросов из одной группы одновременно (если модель это поддерживает по max_concurrent_requests).\n"
+            "Быстро, но может быть беспорядочно.\n\n"
+            "ВЫКЛЮЧЕНО (последовательно):\n"
+            "Бот отвечает на запросы из одной группы по одному — ждёт полного ответа перед обработкой следующего.\n"
+            "Медленнее, но более упорядочено и предсказуемо."
+        )
+        self.cb_stt_annotate = SwitchRow("Акцентировать внимание на голосовых и кружочках", settings.get('stt_annotate', False))
+        self.cb_stt_annotate.setToolTip(
+            "Пометка аудио\n"
+            "Добавлять метки '[Голосовое]' и '[Кружочек]' перед распознанным текстом в истории.\n"
+            "Помогает понять, что сообщение пришло из аудио, а не было набрано текстом."
+        )
+        for w in (self.cb_mention_only, self.cb_reject_empty_mentions, self.cb_group_parallel, self.cb_stt_annotate):
+            beh.addWidget(w)
+        layout.addWidget(beh_box)
 
-        self.cb_accept_bot_messages = QCheckBox("Принимать сообщения от Telegram-ботов")
-        self.cb_accept_bot_messages.setChecked(settings.get('accept_bot_messages', True))
+        # ── Bot policy ──
+        bot_policy = settings.get('bot_access_policy') or {}
+        bot_box, bot = self._group("Сообщения от ботов (Bot policy)")
+        self.cb_accept_bot_messages = SwitchRow("Принимать сообщения от Telegram-ботов", settings.get('accept_bot_messages', True))
         self.cb_accept_bot_messages.setToolTip(
+            "Сообщения от ботов\n"
             "Если включено, сообщения от других Telegram-ботов обрабатываются как сообщения обычных пользователей:\n"
             "сохраняются в историю и могут получить ответ, если проходят текущие правила чата.\n"
             "Если выключено, такие сообщения полностью игнорируются."
         )
-        form.addRow("Сообщения от ботов:", self.cb_accept_bot_messages)
+        bot.addWidget(self.cb_accept_bot_messages)
 
-        bot_policy = settings.get('bot_access_policy') or {}
-        self.combo_bot_policy_mode = QComboBox()
+        self.combo_bot_policy_mode = FxComboBox()
         self.combo_bot_policy_mode.addItems(["all", "off", "allowlist", "denylist"])
         current_mode = str(bot_policy.get('mode', 'all')).strip().lower()
         self.combo_bot_policy_mode.setCurrentText(current_mode if current_mode in {"all", "off", "allowlist", "denylist"} else "all")
         self.combo_bot_policy_mode.setToolTip(
+            "Режим Bot policy\n"
             "Дополнительная политика для сообщений от Telegram-ботов:\n"
             "all - принимать всех, если общий переключатель включен;\n"
             "off - не принимать ботов;\n"
             "allowlist - принимать только ID из списка;\n"
             "denylist - принимать всех, кроме ID из списка."
         )
-        form.addRow("Bot policy:", self.combo_bot_policy_mode)
-
         self.le_bot_allow_ids = QLineEdit()
+        self.le_bot_allow_ids.setObjectName("mono")
         self.le_bot_allow_ids.setPlaceholderText("12345, 67890")
         self.le_bot_allow_ids.setText(", ".join(str(item) for item in bot_policy.get('allow_bot_ids', []) or []))
-        self.le_bot_allow_ids.setToolTip("Telegram ID ботов для режима allowlist. Разделители: запятая, точка с запятой или новая строка.")
-        form.addRow("Разрешенные bot ID:", self.le_bot_allow_ids)
-
+        self.le_bot_allow_ids.setToolTip(
+            "Разрешённые bot ID\nTelegram ID ботов для режима allowlist. Разделители: запятая, точка с запятой или новая строка."
+        )
         self.le_bot_deny_ids = QLineEdit()
+        self.le_bot_deny_ids.setObjectName("mono")
         self.le_bot_deny_ids.setPlaceholderText("12345, 67890")
         self.le_bot_deny_ids.setText(", ".join(str(item) for item in bot_policy.get('deny_bot_ids', []) or []))
-        self.le_bot_deny_ids.setToolTip("Telegram ID ботов для режима denylist. Разделители: запятая, точка с запятой или новая строка.")
-        form.addRow("Запрещенные bot ID:", self.le_bot_deny_ids)
+        self.le_bot_deny_ids.setToolTip(
+            "Запрещённые bot ID\nTelegram ID ботов для режима denylist. Разделители: запятая, точка с запятой или новая строка."
+        )
+        bot.addLayout(field("РЕЖИМ", self.combo_bot_policy_mode))
+        bot.addLayout(field("РАЗРЕШЁННЫЕ BOT ID", self.le_bot_allow_ids))
+        bot.addLayout(field("ЗАПРЕЩЁННЫЕ BOT ID", self.le_bot_deny_ids))
 
-        self.cb_bot_policy_private = QCheckBox("Применять в личных чатах")
-        self.cb_bot_policy_private.setChecked(bool(bot_policy.get('apply_in_private', True)))
-        self.cb_bot_policy_private.setToolTip(
-            "Применять Bot policy к личным чатам с обычными пользователями."
-        )
-        self.cb_bot_policy_groups = QCheckBox("Применять в группах")
-        self.cb_bot_policy_groups.setChecked(bool(bot_policy.get('apply_in_groups', True)))
-        self.cb_bot_policy_groups.setToolTip(
-            "Применять Bot policy к группам и супергруппам."
-        )
-        self.cb_bot_policy_secretary = QCheckBox("Применять в режиме Личный секретарь")
-        self.cb_bot_policy_secretary.setChecked(bool(bot_policy.get('apply_in_secretary', False)))
+        bot.addWidget(label("ГДЕ ПРИМЕНЯТЬ", "sectionLabel"))
+        self.cb_bot_policy_private = SwitchRow("Применять в личных чатах", bool(bot_policy.get('apply_in_private', True)))
+        self.cb_bot_policy_private.setToolTip("Личные чаты\nПрименять Bot policy к личным чатам с обычными пользователями.")
+        self.cb_bot_policy_groups = SwitchRow("Применять в группах", bool(bot_policy.get('apply_in_groups', True)))
+        self.cb_bot_policy_groups.setToolTip("Группы\nПрименять Bot policy к группам и супергруппам.")
+        self.cb_bot_policy_secretary = SwitchRow("Применять в режиме Личный секретарь", bool(bot_policy.get('apply_in_secretary', False)))
         self.cb_bot_policy_secretary.setToolTip(
+            "Личный секретарь\n"
             "Применять Bot policy к входящим сообщениям Telegram-ботов в режиме личного секретаря.\n"
             "Обычно выключено, чтобы не ломать business-чаты без явной необходимости."
         )
-        form.addRow("Bot policy scope:", self.cb_bot_policy_private)
-        form.addRow(" ", self.cb_bot_policy_groups)
-        form.addRow(" ", self.cb_bot_policy_secretary)
+        for w in (self.cb_bot_policy_private, self.cb_bot_policy_groups, self.cb_bot_policy_secretary):
+            bot.addWidget(w)
+        layout.addWidget(bot_box)
 
-        self.cb_group_parallel.setToolTip(
-            "Поведение бота в групповых чатах:\n\n"
-            "✅ ВКЛЮЧЕНО (параллельно):\n"
-            "Бот отвечает на несколько запросов из одной группы одновременно (если модель это поддерживает по max_concurrent_requests).\n"
-            "Быстро, но может быть беспорядочно.\n\n"
-            "❌ ВЫКЛЮЧЕНО (последовательно):\n"
-            "Бот отвечает на запросы из одной группы по одному — ждёт полного ответа перед обработкой следующего.\n"
-            "Медленнее, но более упорядочено и предсказуемо."
+        # ── Уведомления и стриминг ──
+        note_box, note = self._group("Уведомления и стриминг")
+        self.cb_sys_notify = SwitchRow("Показывать системные уведомления в чате", settings.get('chat_system_notifications', True))
+        self.cb_sys_notify.setToolTip(
+            "Системные уведомления\n"
+            "Показывать пользователю служебные уведомления (например, предупреждения о переполнении контекста).\n"
+            "Отключите для чистого UX."
         )
-        form.addRow("Режим обработки в группах:", self.cb_group_parallel)
-
-        # 🆕 Пометка голосовых сообщений
-        self.cb_stt_annotate = QCheckBox("Акцентировать внимание на голосовых и кружочках")
-        self.cb_stt_annotate.setChecked(settings.get('stt_annotate', False))
-        self.cb_stt_annotate.setToolTip(
-            "Добавлять метки '[Голосовое]' и '[Кружочек]' перед распознанным текстом в истории.\n"
-            "Помогает понять, что сообщение пришло из аудио, а не было набрано текстом."
-        )
-        form.addRow("Аудио:", self.cb_stt_annotate)
-
-        # Анимация генерации ответа
-        self.cb_stream_draft = QCheckBox("Плавная генерация текста (стриминг)")
-        self.cb_stream_draft.setChecked(settings.get('stream_mode', False))
+        self.cb_stream_draft = SwitchRow("Плавная генерация текста (стриминг)", settings.get('stream_mode', False))
         self.cb_stream_draft.setToolTip(
+            "Стриминг\n"
             "Показывать ответ ИИ по мере генерации.\n"
             "Если Rich Messages включены, используется sendRichMessageDraft + финальный sendRichMessage.\n"
             "Если Rich Messages выключены, используется старый режим edit_text.\n\n"
-            "⚠ Работает ТОЛЬКО в личных сообщениях с ботом.\n"
+            "Работает ТОЛЬКО в личных сообщениях с ботом.\n"
             "В группах и режиме секретаря бот автоматически переключается на обычный режим/fallback."
         )
-        form.addRow("Стриминг:", self.cb_stream_draft)
+        note.addWidget(self.cb_sys_notify)
+        note.addWidget(self.cb_stream_draft)
+        layout.addWidget(note_box)
 
-        group.setLayout(form)
-        layout.addWidget(group)
+        # ── Окно контекста (токенов) по умолчанию ──
+        ctx_box, ctx_lay = self._group("Окно контекста")
+        self.le_ctx_len = QLineEdit()
+        self.le_ctx_len.setObjectName("mono")
+        self.le_ctx_len.setPlaceholderText("4096")
+        self.le_ctx_len.setToolTip(
+            "Окно контекста по умолчанию\n"
+            "Размер окна контекста по умолчанию (в токенах). Используется как fallback для моделей, если не указан context_window_size.\n"
+            "Каждая модель может иметь свой размер контекста — смотрите настройки при добавлении модели.\n"
+            "Примеры: 4096, 8192, 16384. Убедитесь, что система достаточно мощна для работы с большими значениями."
+        )
+        self.le_ctx_len.setText(str(settings.get('default_context_length', 4096)))
+        ctx_lay.addLayout(field("ПО УМОЛЧАНИЮ, ТОКЕНЫ (НЕ МЕНЬШЕ 1024)", self.le_ctx_len))
+        layout.addWidget(ctx_box)
         layout.addStretch()
 
         # Карточка оформления + длинная форма не помещаются в окно целиком — оборачиваем в прокрутку
@@ -229,6 +248,7 @@ class ExtraSettingsTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 0)
@@ -246,7 +266,7 @@ class ExtraSettingsTab(QWidget):
             toast.show_message(text)
 
     def _update_rich_controls(self, enabled):
-        for widget in (self.rich_format_combo, self.cb_rich_fallback, self.cb_rich_streaming):
+        for widget in (self._rich_format_field, self.cb_rich_fallback, self.cb_rich_streaming):
             widget.setEnabled(bool(enabled))
 
     def save_settings(self):
