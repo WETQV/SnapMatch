@@ -2,15 +2,14 @@
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout,
-    QComboBox, QGroupBox, QHBoxLayout, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QDialog, QTextEdit,
-    QCheckBox, QWidget, QApplication, QFrame, QGridLayout, QListWidget,
-    QListWidgetItem, QSplitter, QInputDialog, QSizePolicy)
+    QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox, QHBoxLayout, QTableWidget,
+    QTableWidgetItem, QHeaderView, QMessageBox, QDialog, QTextEdit, QApplication, QFrame,
+    QGridLayout, QListWidget, QListWidgetItem, QSplitter, QInputDialog, QSizePolicy,
+    QScrollArea, QSpinBox, QAbstractItemView,
+)
 from PyQt6.QtCore import Qt, QTimer
-from gui.widgets import UnicodeSpinBox, UnicodeDoubleSpinBox
 from config.settings import settings_manager  # Импортируем существующий экземпляр
-from PyQt6.QtGui import QDoubleValidator, QIntValidator, QPalette, QFont, QFontDatabase
+from PyQt6.QtGui import QDoubleValidator, QIntValidator, QFontDatabase
 from bot.handlers.queue_manager import (
     get_model_usage_stats,
     get_available_placeholders,
@@ -18,10 +17,49 @@ from bot.handlers.queue_manager import (
     validate_system_prompt,
 )
 from bot.handlers.services.prompt_manager import build_system_prompt_status
-from .services.model_service import ModelService  # 🆕 Новый сервис для управления моделями
+from gui.design import (
+    Collapsible, FxButton, FxComboBox, StatusBadge, Switch, SwitchRow,
+    card, icon_button, label, page_header, primary,
+)
+from .services.model_service import ModelService  # Сервис управления моделями
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+
+def _caption_field(caption: str, widget: QWidget) -> QWidget:
+    """Поле с подписью над ним (подписи сверху экономят ширину)."""
+    box = QWidget()
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(4)
+    lay.addWidget(label(caption, "muted"))
+    lay.addWidget(widget)
+    return box
+
+
+def _spin(minimum: int, maximum: int, value: int = 0, step: int = 1) -> QSpinBox:
+    spin = QSpinBox()
+    spin.setRange(minimum, maximum)
+    spin.setSingleStep(step)
+    spin.setValue(value)
+    return spin
+
+
+class ModelsTable(QTableWidget):
+    """Таблица моделей: на узкой ширине скрывает колонки API Key и Base URL (они есть в подсказке ID и в форме
+    редактирования), чтобы не появлялась горизонтальная прокрутка и не обрезались ID и переключатели."""
+
+    COL_KEY, COL_URL = 2, 3
+    WIDTH_FULL = 900          # ключ и URL видны
+    WIDTH_WITH_URL_ONLY = 780  # виден только URL
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        width = self.viewport().width()
+        self.setColumnHidden(self.COL_KEY, width < self.WIDTH_FULL)
+        self.setColumnHidden(self.COL_URL, width < self.WIDTH_WITH_URL_ONLY)
+
 
 class ModelDialog(QDialog):
     REASONING_MODES = [
@@ -45,34 +83,58 @@ class ModelDialog(QDialog):
     def __init__(self, parent=None, existing_model=None):
         super().__init__(parent)
         self.setWindowTitle("Добавить/Редактировать модель")
-        self.resize(400, 250)
+        self.setMinimumSize(620, 460)
+        self.resize(720, 680)
         self.existing_model = existing_model
         self.init_ui()
         
     def init_ui(self):
-        layout = QVBoxLayout()
-        form_layout = QFormLayout()
-        
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setSpacing(14)
+        outer.addLayout(page_header(
+            "Редактирование модели" if self.existing_model else "Новая модель",
+            "Подключение к API и поведение модели при распределении запросов",
+        ))
+
+        # Прокручиваемая область с секциями-карточками
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 8, 0)
+        body_lay.setSpacing(14)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+
+        # ── Подключение ──
+        connection, conn_lay = card()
+        conn_lay.setSpacing(12)
+        conn_lay.addWidget(label("Подключение", "h2"))
+
         # Тип API (первый элемент — определяет подсказки остальных полей)
-        self.api_type_combo = QComboBox()
+        self.api_type_combo = FxComboBox()
         self.api_type_combo.addItems([
             "OpenAI-compatible (LM Studio, Ollama, OpenAI, OpenRouter, Chutes)",
             "Anthropic (Claude)",
         ])
         self.api_type_combo.setToolTip(
-            "Тип API определяет формат запросов к модели.\n\n"
+            "Тип API\n"
+            "Определяет формат запросов к модели.\n\n"
             "OpenAI-compatible — универсальный формат.\n"
             "  Поддерживается: LM Studio, Ollama, OpenAI, OpenRouter, Chutes, Together AI и др.\n\n"
             "Anthropic (Claude) — формат для API Claude.\n"
             "  Используется: Anthropic Claude (api.anthropic.com)"
         )
         self.api_type_combo.currentIndexChanged.connect(self._on_api_type_changed)
-        form_layout.addRow('Тип API:', self.api_type_combo)
-        
-        # ID модели
+        conn_lay.addWidget(_caption_field('Тип API', self.api_type_combo))
+
         self.model_id_input = QLineEdit()
         self.model_id_input.setPlaceholderText('Например: gemma-7b-it')
         self.model_id_input.setToolTip(
+            "ID модели\n"
             "Уникальный идентификатор модели. Используется при запросах к API.\n\n"
             "LM Studio: название модели из списка загруженных\n"
             "Ollama: название модели (например: llama3.2)\n"
@@ -81,13 +143,11 @@ class ModelDialog(QDialog):
             "Chutes: ID модели/cord в формате провайдера.\n\n"
             "Если несколько экземпляров одной модели — добавьте суффикс (например: gemma-7b-it:1)"
         )
-        form_layout.addRow('ID модели:', self.model_id_input)
-        
-        # API Key
         self.api_key_input = QLineEdit()
         self.api_key_input.setPlaceholderText('API ключ для LM Studio')
         self.api_key_input.setToolTip(
-            "Ключ API для авторизации.\n\n"
+            "API ключ\n"
+            "Ключ для авторизации.\n\n"
             "LM Studio: используется то же значение, что и ID модели\n"
             "Ollama: не требуется, но можно продублировать название модели (например: llama3.2)\n"
             "OpenAI: ключ вида sk-... из dashboard.openai.com\n"
@@ -95,13 +155,11 @@ class ModelDialog(QDialog):
             "OpenRouter: ключ вида sk-or-... из openrouter.ai/keys\n"
             "Chutes: API ключ провайдера, если доступ к модели требует авторизацию"
         )
-        form_layout.addRow('API ключ:', self.api_key_input)
-        
-        # Base URL
         self.base_url_input = QLineEdit()
         self.base_url_input.setPlaceholderText('http://localhost:1234/v1')
         self.base_url_input.setToolTip(
-            "URL для API запросов.\n\n"
+            "URL API\n"
+            "Адрес для API запросов.\n\n"
             "Локальные серверы:\n"
             "  LM Studio: http://localhost:1234/v1\n"
             "  Ollama: http://localhost:11434/v1\n\n"
@@ -111,81 +169,107 @@ class ModelDialog(QDialog):
             "  Chutes: https://llm.chutes.ai/v1\n\n"
             "Формат: http(s)://<адрес>:<порт>/v1"
         )
-        form_layout.addRow('URL API:', self.base_url_input)
-        
-        # Weight (кастомный UnicodeSpinBox)
-        self.weight_input = UnicodeSpinBox(min=1, max=100, value=1)
-        self.weight_input.setToolTip("Вес модели для взвешенного распределения запросов.\nЧем больше значение, тем чаще модель будет выбираться при стратегии random_weighted")
-        form_layout.addRow('Вес (для балансировки):', self.weight_input)
-        
-        # Активная модель
-        self.active_checkbox = QCheckBox("Активировать модель")
-        self.active_checkbox.setChecked(True)
-        self.active_checkbox.setToolTip("Если отключено, модель не будет использоваться для обработки запросов")
-        form_layout.addRow('', self.active_checkbox)
+        ids = QGridLayout()
+        ids.setHorizontalSpacing(14)
+        ids.setColumnStretch(0, 1)
+        ids.setColumnStretch(1, 1)
+        ids.addWidget(_caption_field('ID модели', self.model_id_input), 0, 0)
+        ids.addWidget(_caption_field('API ключ', self.api_key_input), 0, 1)
+        conn_lay.addLayout(ids)
+        conn_lay.addWidget(_caption_field('URL API', self.base_url_input))
+        body_lay.addWidget(connection)
 
-        # Поддержка изображений (VLM)
-        self.vision_checkbox = QCheckBox("Поддерживает изображение (VLM)")
-        self.vision_checkbox.setChecked(False)
-        self.vision_checkbox.setToolTip(
-            "Включите, если модель умеет обрабатывать изображения (Vision-Language Model).\n"
-            "Такие модели получат доступ к изображениями из истории и запросов."
+        # ── Поведение ──
+        behavior, beh_lay = card()
+        beh_lay.setSpacing(12)
+        beh_lay.addWidget(label("Поведение", "h2"))
+
+        self.weight_input = _spin(1, 100, 1)
+        self.weight_input.setToolTip(
+            "Вес для балансировки\n"
+            "Вес модели для взвешенного распределения запросов.\n"
+            "Чем больше значение, тем чаще модель будет выбираться при стратегии random_weighted"
         )
-        form_layout.addRow('', self.vision_checkbox)
-
-        reasoning_group = QGroupBox("Думание модели")
-        reasoning_layout = QFormLayout(reasoning_group)
-
-        self.reasoning_mode_combo = QComboBox()
-        for label, value in self.REASONING_MODES:
-            self.reasoning_mode_combo.addItem(label, value)
-        self.reasoning_mode_combo.setToolTip(
-            "Не управлять — режим по умолчанию, без дополнительных reasoning-параметров.\n"
-            "Thinking не выводится в Telegram."
-        )
-        reasoning_layout.addRow('Думание:', self.reasoning_mode_combo)
-
-        self.reasoning_provider_combo = QComboBox()
-        for label, value in self.REASONING_PROVIDERS:
-            self.reasoning_provider_combo.addItem(label, value)
-        self.reasoning_provider_combo.setToolTip("Формат reasoning/thinking payload для провайдера.")
-        reasoning_layout.addRow('Формат:', self.reasoning_provider_combo)
-
-        self.reasoning_budget_input = UnicodeSpinBox(min=0, max=200000, value=0, step=1024)
-        self.reasoning_budget_input.setToolTip(
-            "Бюджет thinking-токенов для Anthropic budget или OpenRouter budget. 0 — не передавать бюджет.\n"
-            "Для Anthropic минимум 1024 и значение должно быть меньше max_tokens."
-        )
-        reasoning_layout.addRow('Бюджет токенов:', self.reasoning_budget_input)
-        self.reasoning_mode_combo.currentIndexChanged.connect(self._update_reasoning_budget_state)
-        self.reasoning_provider_combo.currentIndexChanged.connect(self._update_reasoning_budget_state)
-        form_layout.addRow(reasoning_group)
-        
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # 🔧 ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ МОДЕЛИ
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        
-        # Макс. одновременных запросов (кастомный UnicodeSpinBox)
-        self.max_concurrent_input = UnicodeSpinBox(min=1, max=100, value=1)
+        self.max_concurrent_input = _spin(1, 100, 1)
         self.max_concurrent_input.setToolTip(
+            "Макс. одновременных запросов\n"
             "Максимальное количество одновременных запросов для этой модели.\n\n"
             "LM Studio 0.4+: до 4 (настраивается в Advanced Settings → Max Concurrent Predictions)\n"
             "Ollama: 3-10 в зависимости от железа (если мощное, можно выше)\n"
             "Облачные API (OpenAI, Claude, OpenRouter): 5-50 в зависимости от тарифа\n\n"
             "Бот автоматически распределяет запросы с учётом этого лимита."
         )
-        form_layout.addRow('Макс. одновременных запросов:', self.max_concurrent_input)
-        
-        # Размер окна контекста (кастомный UnicodeSpinBox)
-        self.context_window_input = UnicodeSpinBox(min=256, max=131072, value=4096, step=512)
+        self.context_window_input = _spin(256, 131072, 4096, 512)
         self.context_window_input.setToolTip(
+            "Размер окна контекста\n"
             "Размер окна контекста модели в токенах.\n"
             "LM Studio: посмотрите в Server settings → Context length (ctx_len)\n"
             "Ollama: запустите команду 'ollama show --json model_name' и ищите context_length\n"
             "Примеры: llama3=8192, mistral=32768, gemma=4096"
         )
-        form_layout.addRow('Размер окна контекста (токены):', self.context_window_input)
-        
+        numbers = QGridLayout()
+        numbers.setHorizontalSpacing(14)
+        for column in range(3):
+            numbers.setColumnStretch(column, 1)
+        numbers.addWidget(_caption_field('Вес (для балансировки)', self.weight_input), 0, 0)
+        numbers.addWidget(_caption_field('Макс. одновременных запросов', self.max_concurrent_input), 0, 1)
+        numbers.addWidget(_caption_field('Окно контекста (токены)', self.context_window_input), 0, 2)
+        beh_lay.addLayout(numbers)
+
+        self.active_checkbox = SwitchRow("Активировать модель", True)
+        self.active_checkbox.setToolTip("Активировать модель\nЕсли отключено, модель не будет использоваться для обработки запросов")
+        beh_lay.addWidget(self.active_checkbox)
+
+        self.vision_checkbox = SwitchRow("Поддерживает изображения (VLM)", False)
+        self.vision_checkbox.setToolTip(
+            "Поддержка изображений (VLM)\n"
+            "Включите, если модель умеет обрабатывать изображения (Vision-Language Model).\n"
+            "Такие модели получат доступ к изображениям из истории и запросов."
+        )
+        beh_lay.addWidget(self.vision_checkbox)
+        body_lay.addWidget(behavior)
+
+        # ── Думание модели (редко нужно — под раскрывающейся секцией) ──
+        reasoning_box = QWidget()
+        reasoning_grid = QGridLayout(reasoning_box)
+        reasoning_grid.setContentsMargins(0, 0, 0, 0)
+        reasoning_grid.setHorizontalSpacing(14)
+        for column in range(3):
+            reasoning_grid.setColumnStretch(column, 1)
+
+        self.reasoning_mode_combo = FxComboBox()
+        for text, value in self.REASONING_MODES:
+            self.reasoning_mode_combo.addItem(text, value)
+        self.reasoning_mode_combo.setToolTip(
+            "Думание\n"
+            "Не управлять — режим по умолчанию, без дополнительных reasoning-параметров.\n"
+            "Thinking не выводится в Telegram."
+        )
+        self.reasoning_provider_combo = FxComboBox()
+        for text, value in self.REASONING_PROVIDERS:
+            self.reasoning_provider_combo.addItem(text, value)
+        self.reasoning_provider_combo.setToolTip("Формат\nФормат reasoning/thinking payload для провайдера.")
+        self.reasoning_budget_input = _spin(0, 200000, 0, 1024)
+        self.reasoning_budget_input.setToolTip(
+            "Бюджет токенов\n"
+            "Бюджет thinking-токенов для Anthropic budget или OpenRouter budget. 0 — не передавать бюджет.\n"
+            "Для Anthropic минимум 1024 и значение должно быть меньше max_tokens."
+        )
+        reasoning_grid.addWidget(_caption_field('Думание', self.reasoning_mode_combo), 0, 0)
+        reasoning_grid.addWidget(_caption_field('Формат', self.reasoning_provider_combo), 0, 1)
+        reasoning_grid.addWidget(_caption_field('Бюджет токенов', self.reasoning_budget_input), 0, 2)
+        self.reasoning_mode_combo.currentIndexChanged.connect(self._update_reasoning_budget_state)
+        self.reasoning_provider_combo.currentIndexChanged.connect(self._update_reasoning_budget_state)
+
+        reasoning_card, reasoning_lay = card()
+        self.reasoning_group = Collapsible(
+            "Думание модели", reasoning_box,
+            expanded=bool(self.existing_model) and self._existing_reasoning_mode() != 'default',
+        )
+        reasoning_lay.addWidget(self.reasoning_group)
+        body_lay.addWidget(reasoning_card)
+        body_lay.addStretch(1)
+
         # Если редактируем существующую модель
         if self.existing_model:
             # Устанавливаем тип API
@@ -203,32 +287,34 @@ class ModelDialog(QDialog):
             self.max_concurrent_input.setValue(self.existing_model.get('max_concurrent_requests', 1))
             self.context_window_input.setValue(self.existing_model.get('context_window_size', 4096))
             self.vision_checkbox.setChecked(self.existing_model.get('supports_vision', False))
-            reasoning_mode = self.existing_model.get('reasoning_mode')
-            if not reasoning_mode:
-                reasoning_mode = self.existing_model.get('reasoning_effort', 'medium') if self.existing_model.get('reasoning_enabled') else 'default'
-                if reasoning_mode == 'none':
-                    reasoning_mode = 'off'
-            self._set_combo_by_data(self.reasoning_mode_combo, reasoning_mode)
+            self._set_combo_by_data(self.reasoning_mode_combo, self._existing_reasoning_mode())
             self._set_combo_by_data(self.reasoning_provider_combo, self.existing_model.get('reasoning_provider', 'auto'))
             self.reasoning_budget_input.setValue(self.existing_model.get('reasoning_budget_tokens', 0))
         self._update_reasoning_budget_state()
         
         # Кнопки
         button_layout = QHBoxLayout()
-        self.save_button = QPushButton('Сохранить')
-        self.cancel_button = QPushButton('Отмена')
-        
-        button_layout.addWidget(self.save_button)
+        button_layout.addStretch(1)
+        self.cancel_button = FxButton('Отмена')
+        self.save_button = primary('Сохранить')
         button_layout.addWidget(self.cancel_button)
-        
-        layout.addLayout(form_layout)
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
+        button_layout.addWidget(self.save_button)
+        outer.addLayout(button_layout)
         
         # Привязка событий
         self.save_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
     
+    def _existing_reasoning_mode(self) -> str:
+        """Режим думания редактируемой модели (с учётом старых полей reasoning_enabled/effort)."""
+        model = self.existing_model or {}
+        mode = model.get('reasoning_mode')
+        if not mode:
+            mode = model.get('reasoning_effort', 'medium') if model.get('reasoning_enabled') else 'default'
+            if mode == 'none':
+                mode = 'off'
+        return mode
+
     def _on_api_type_changed(self, index: int):
         """Обновляет плейсхолдеры полей при смене типа API."""
         if index == 1:  # Anthropic
@@ -272,6 +358,7 @@ class ModelDialog(QDialog):
         }
 
 
+
 class PromptEditorDialog(QDialog):
     HISTORY_LIMIT = 15
 
@@ -304,139 +391,112 @@ class PromptEditorDialog(QDialog):
         self.show_defaults = bool(show_defaults)
 
         self.setWindowTitle(title)
-        self.resize(1180, 720)
+        self.setMinimumSize(900, 660)
+        self.resize(1140, 700)
         self.init_ui()
         self._load_initial_state()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(14)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
-        accent_color = QApplication.palette().color(QPalette.ColorRole.Highlight).name()
-        border_color = QApplication.palette().color(QPalette.ColorRole.Mid).name()
-        is_oled = settings_manager.get_settings().get('oled_mode', False)
-        panel_bg = "#000000" if is_oled else "#252526"
 
-        editor_panel = QWidget()
-        editor_layout = QVBoxLayout(editor_panel)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(8)
-
+        # ── Слева: редактор ──
+        editor_card, editor_layout = card()
+        editor_layout.setSpacing(10)
+        editor_layout.addWidget(label("Текст промпта", "h2"))
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setPlaceholderText(
             "Введите System Prompt. Плейсхолдеры можно скопировать справа и вставить в текст."
         )
         editor_layout.addWidget(self.prompt_editor, 1)
+        editor_card.setMinimumWidth(380)
 
+        # ── Справа: карточки ──
         side_panel = QWidget()
         side_layout = QVBoxLayout(side_panel)
         side_layout.setContentsMargins(0, 0, 0, 0)
-        side_layout.setSpacing(10)
-        side_panel.setMinimumWidth(280)
-        side_panel.setMaximumWidth(320)
+        side_layout.setSpacing(12)
+        side_panel.setMinimumWidth(300)
+        side_panel.setMaximumWidth(380)
 
-        defaults_group = QGroupBox("Дефолты плейсхолдеров")
-        self.defaults_group = defaults_group
-        defaults_form = QFormLayout()
-        defaults_form.setContentsMargins(10, 8, 10, 10)
-        defaults_form.setSpacing(8)
+        # Дефолты плейсхолдеров
+        self.defaults_group, defaults_layout = card()
+        defaults_layout.setSpacing(8)
+        defaults_layout.addWidget(label("Дефолты плейсхолдеров", "h2"))
         self.ph_model_name = QLineEdit()
         self.ph_model_name.setPlaceholderText("например: gemma-3-4b-it")
         self.ph_user_name = QLineEdit()
         self.ph_user_name.setPlaceholderText("например: Vetta")
-        self.ph_datetime = QLineEdit()
-        self.ph_datetime.setReadOnly(True)
-        defaults_form.addRow("model_name:", self.ph_model_name)
-        defaults_form.addRow("user_name:", self.ph_user_name)
-        defaults_form.addRow("datetime:", self.ph_datetime)
-        defaults_group.setLayout(defaults_form)
-        defaults_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        side_layout.addWidget(defaults_group)
+        for edit in (self.ph_model_name, self.ph_user_name):
+            edit.setMinimumHeight(34)
+        defaults_layout.addWidget(_caption_field("model_name", self.ph_model_name))
+        defaults_layout.addWidget(_caption_field("user_name", self.ph_user_name))
+        # datetime не редактируется — подставляется автоматически
+        self.ph_datetime = label("", "muted")
+        defaults_layout.addWidget(self.ph_datetime)
+        self.defaults_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        side_layout.addWidget(self.defaults_group)
         if not self.show_defaults:
-            defaults_group.hide()
+            self.defaults_group.hide()
 
-        placeholders_section = QGroupBox("Плейсхолдеры")
-        placeholders_section_layout = QVBoxLayout(placeholders_section)
-        self.placeholders_section = placeholders_section
-        placeholders_section_layout.setContentsMargins(10, 8, 10, 10)
-        placeholders_section_layout.setSpacing(6)
-
-        placeholders_tooltip = "Двойной клик по элементу копирует плейсхолдер. Описание доступно в подсказке при наведении."
-
-        placeholders_title_row = QHBoxLayout()
-        placeholders_title_row.setContentsMargins(10, 0, 10, 0)
-        placeholders_title_row.setSpacing(6)
-        self.placeholders_title = QLabel("Плейсхолдеры")
-        self.placeholders_title.setObjectName("placeholdersTitle")
-        self.placeholders_title.setStyleSheet("font-weight: 700;")
-        self.placeholders_title.setToolTip("")
-        self.placeholders_section.setToolTip(placeholders_tooltip)
-        self.placeholders_title.hide()
-        self.placeholders_title.setStyleSheet(
-            "font-weight: 700;"
-        )
-        placeholders_title_row.addWidget(self.placeholders_title)
-        placeholders_title_row.addStretch()
-
-        self.placeholders_group = QFrame()
-        self.placeholders_group.setObjectName("promptPlaceholdersCard")
-        self.placeholders_group.setFrameShape(QFrame.Shape.NoFrame)
-        self.placeholders_group.setStyleSheet(
-            "#promptPlaceholdersCard { background-color: transparent; border: none; }"
-        )
-        placeholders_layout = QVBoxLayout()
-        placeholders_layout.setContentsMargins(10, 8, 10, 10)
-        placeholders_layout.setSpacing(6)
+        # Плейсхолдеры (двойной клик копирует)
+        self.placeholders_section, placeholders_layout = card()
+        placeholders_layout.setSpacing(8)
+        placeholders_layout.addWidget(label("Плейсхолдеры", "h2"))
+        self.placeholders_hint = label("Двойной клик по элементу копирует плейсхолдер.", "muted")
+        self.placeholders_hint.setWordWrap(True)
+        placeholders_layout.addWidget(self.placeholders_hint)
         self.placeholders_list = QListWidget()
         self.placeholders_list.setAlternatingRowColors(True)
-        self.placeholders_list.setMinimumHeight(248)
-        self.placeholders_list.setStyleSheet(
-            f"QListWidget {{ background-color: {panel_bg}; border: 1px solid {border_color}; color: #FFFFFF; }}"
+        self.placeholders_list.setMinimumHeight(120)
+        self.placeholders_list.setToolTip(
+            "Плейсхолдеры\nДвойной клик по элементу копирует плейсхолдер. Описание доступно в подсказке при наведении."
         )
         self.placeholders_list.itemDoubleClicked.connect(self.copy_placeholder_item)
-        placeholders_layout.addWidget(self.placeholders_list)
-        self.placeholders_group.setLayout(placeholders_layout)
-        placeholders_section_layout.addWidget(self.placeholders_group, 1)
-        side_layout.addWidget(placeholders_section, 1)
+        placeholders_layout.addWidget(self.placeholders_list, 1)
+        side_layout.addWidget(self.placeholders_section, 1)
 
-        templates_group = QGroupBox("Шаблоны")
-        templates_layout = QVBoxLayout()
-        templates_layout.setContentsMargins(10, 8, 10, 10)
+        # Шаблоны
+        templates_group, templates_layout = card()
         templates_layout.setSpacing(8)
+        templates_layout.addWidget(label("Шаблоны", "h2"))
         self.templates_list = QListWidget()
-        self.templates_list.setStyleSheet(
-            f"QListWidget {{ background-color: {panel_bg}; border: 1px solid {border_color}; color: #FFFFFF; }}"
-        )
-        templates_layout.addWidget(self.templates_list)
+        self.templates_list.setMinimumHeight(64)
+        templates_layout.addWidget(self.templates_list, 1)
         templates_buttons = QHBoxLayout()
-        self.save_template_button = QPushButton("Сохранить")
-        self.load_template_button = QPushButton("Загрузить")
-        self.delete_template_button = QPushButton("Удалить")
-        templates_buttons.addWidget(self.save_template_button)
-        templates_buttons.addWidget(self.load_template_button)
-        templates_buttons.addWidget(self.delete_template_button)
+        templates_buttons.setSpacing(6)
+        self.save_template_button = FxButton("Сохранить")
+        self.load_template_button = FxButton("Загрузить")
+        self.delete_template_button = FxButton("Удалить")
+        self.delete_template_button.setObjectName("danger")
+        self.save_template_button.setToolTip("Сохранить шаблон\nСохраняет текущий текст промпта под выбранным названием.")
+        self.load_template_button.setToolTip("Загрузить шаблон\nЗаменяет текст в редакторе выбранным шаблоном.")
+        self.delete_template_button.setToolTip("Удалить шаблон\nУдаляет выбранный шаблон после подтверждения.")
+        for button in (self.save_template_button, self.load_template_button, self.delete_template_button):
+            templates_buttons.addWidget(button, 1)
         templates_layout.addLayout(templates_buttons)
-        templates_group.setLayout(templates_layout)
-        templates_group.setMinimumHeight(130)
         side_layout.addWidget(templates_group, 1)
 
-        splitter.addWidget(editor_panel)
+        splitter.addWidget(editor_card)
         splitter.addWidget(side_panel)
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 0)
         main_layout.addWidget(splitter, 1)
 
         actions_layout = QHBoxLayout()
-        self.check_prompt_button = QPushButton("Проверить промпт")
-        self.apply_button = QPushButton("Сохранить и применить")
-        self.cancel_button = QPushButton("Отмена")
+        self.check_prompt_button = icon_button("Проверить промпт", "mdi6.check-decagram-outline")
+        self.check_prompt_button.setToolTip("Проверить промпт\nИщет ошибки в тексте и оценивает размер в токенах.")
+        self.apply_button = primary("Сохранить и применить")
+        self.cancel_button = FxButton("Отмена")
         actions_layout.addWidget(self.check_prompt_button)
         actions_layout.addStretch()
-        actions_layout.addWidget(self.apply_button)
         actions_layout.addWidget(self.cancel_button)
+        actions_layout.addWidget(self.apply_button)
         main_layout.addLayout(actions_layout)
 
-        self.prompt_editor.textChanged.connect(self._mark_dirty)
         self.ph_model_name.editingFinished.connect(self.save_defaults_immediately)
         self.ph_user_name.editingFinished.connect(self.save_defaults_immediately)
         self.save_template_button.clicked.connect(self.save_template)
@@ -450,19 +510,19 @@ class PromptEditorDialog(QDialog):
         self.prompt_editor.setPlainText(self.original_prompt)
         self.ph_model_name.setText(self.placeholder_defaults.get("model_name", ""))
         self.ph_user_name.setText(self.placeholder_defaults.get("user_name", ""))
-        self.ph_datetime.setText(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        self.ph_datetime.setText("datetime подставляется автоматически")
+        self.ph_datetime.setToolTip("datetime\nТекущая дата и время: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self._refresh_placeholders()
         self._refresh_templates()
-        self._mark_dirty()
 
     def _refresh_placeholders(self):
         placeholders = self.placeholder_provider()
         self.placeholders_list.clear()
+        mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        mono.setPointSize(9)
         for placeholder, description in placeholders.items():
             item = QListWidgetItem(placeholder)
             item.setToolTip(description)
-            mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-            mono.setPointSize(9)
             item.setFont(mono)
             self.placeholders_list.addItem(item)
 
@@ -474,9 +534,6 @@ class PromptEditorDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, template)
             item.setToolTip(template.get("text", "")[:400])
             self.templates_list.addItem(item)
-
-    def _mark_dirty(self):
-        pass
 
     def _confirm_discard_changes(self, action_text):
         if self.prompt_editor.toPlainText().rstrip() == (self._last_applied_prompt or "").rstrip():
@@ -490,9 +547,19 @@ class PromptEditorDialog(QDialog):
         )
         return reply == QMessageBox.StandardButton.Yes
 
+
     def copy_placeholder_item(self, item):
         if item:
             QApplication.clipboard().setText(item.text())
+            # Короткое подтверждение прямо в подсказке карточки
+            self.placeholders_hint.setText(f"Скопировано: {item.text()}")
+            QTimer.singleShot(2000, self._reset_placeholders_hint)
+
+    def _reset_placeholders_hint(self):
+        try:
+            self.placeholders_hint.setText("Двойной клик по элементу копирует плейсхолдер.")
+        except RuntimeError:
+            pass  # диалог уже закрыт и удалён
 
     def save_defaults_immediately(self):
         self.placeholder_defaults["model_name"] = self.ph_model_name.text().strip()
@@ -605,6 +672,7 @@ class PromptEditorDialog(QDialog):
         super().reject()
 
 
+
 class SettingsPanel(QWidget):
     def __init__(self, bot_thread=None):
         super().__init__()
@@ -613,6 +681,7 @@ class SettingsPanel(QWidget):
         self.placeholder_defaults = {}
         self.system_prompt_history = []
         self.system_prompt_templates = []
+        self._models_snapshot = None
         self.init_ui()
         
         # Создаем таймер для автоматического обновления статистики
@@ -622,40 +691,50 @@ class SettingsPanel(QWidget):
         )
         self.stats_timer.start(5000)  # Обновляем каждые 5 секунд
 
-
     def init_ui(self):
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(6, 6, 6, 6)
-        main_layout.setSpacing(6)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
 
-        top_bar = QHBoxLayout()
-        top_bar.setContentsMargins(0, 0, 0, 0)
-        top_bar.setSpacing(0)
-        self.save_button = QPushButton('Сохранить настройки')
-        top_bar.addStretch()
-        top_bar.addWidget(self.save_button)
-        main_layout.addLayout(top_bar)
+        self.save_button = primary('Сохранить настройки', "mdi6.content-save-outline")
+        self.save_button.setToolTip("Сохранить настройки\nЗаписывает токен, промпт и параметры генерации. При смене токена бот перезапускается.")
+        root.addLayout(page_header("Настройки", "Токен, системный промпт, генерация и модели", self.save_button))
 
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(6)
-        
-        # Основные настройки
-        basic_settings_group = QGroupBox("Основные настройки")
-        basic_settings_layout = QVBoxLayout()
-        basic_settings_layout.setContentsMargins(8, 12, 8, 8)
-        basic_settings_layout.setSpacing(4)
+        # Длинная форма: прокручиваем вертикально, горизонтальной прокрутки нет
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 10, 0)
+        content_layout.setSpacing(16)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
-        # Telegram Token (умное скрытие)
-        self.token_label = QLabel("Telegram Token")
-        self.token_label.setObjectName("settingsAccentLabel")
-        self.token_label.setStyleSheet("font-weight: 700;")
-        self.token_label.setContentsMargins(8, 0, 0, 0)
-        basic_settings_layout.addWidget(self.token_label)
+        content_layout.addWidget(self._build_basic_card())
+        content_layout.addWidget(self._build_generation_card())
+        content_layout.addWidget(self._build_models_card(), 1)
 
+        # Загрузка текущих настроек
+        self.load_settings()
+
+        # Привязка событий
+        self.save_button.clicked.connect(self.save_settings)
+        self.add_model_button.clicked.connect(self.add_model)
+        self.edit_model_button.clicked.connect(self.edit_model)
+        self.delete_model_button.clicked.connect(self.delete_model)
+
+    # ───────────────────────── карточки экрана ─────────────────────────
+    def _build_basic_card(self) -> QFrame:
+        frame, lay = card()
+        lay.setSpacing(12)
+        lay.addWidget(label("Основное", "h2"))
+
+        # Telegram Token (умное скрытие) и администраторы — в две колонки
         self.telegram_token_input = QLineEdit()
-        self.telegram_token_input.setPlaceholderText('Введите ваш Telegram Token. Получить его можно в BotFather.')
-        self.telegram_token_input.setToolTip("Токен бота Telegram.")
+        self.telegram_token_input.setPlaceholderText('Токен из BotFather')
+        self.telegram_token_input.setToolTip("Токен Telegram\nТокен бота из BotFather. Скрыт, пока поле не в фокусе.")
         self.telegram_token_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.token_hide_timer = QTimer(self)
@@ -665,292 +744,220 @@ class SettingsPanel(QWidget):
         self.telegram_token_input.focusInEvent = self.token_focus_in
         self.telegram_token_input.focusOutEvent = self.token_focus_out
         self.telegram_token_input.textChanged.connect(self.token_text_changed)
-        self.token_container = QWidget()
-        token_layout = QHBoxLayout()
-        token_layout.setContentsMargins(8, 0, 0, 0)
-        token_layout.setSpacing(0)
-        token_layout.addWidget(self.telegram_token_input, 1)
-        self.token_container.setLayout(token_layout)
-        basic_settings_layout.addWidget(self.token_container)
-
-        admin_ids_label = QLabel("Администраторы Telegram")
-        admin_ids_label.setObjectName("settingsAccentLabel")
-        admin_ids_label.setStyleSheet("font-weight: 700;")
-        admin_ids_label.setContentsMargins(8, 0, 0, 0)
-        basic_settings_layout.addWidget(admin_ids_label)
 
         self.admin_telegram_ids_input = QLineEdit()
         self.admin_telegram_ids_input.setPlaceholderText("123456789, 987654321")
         self.admin_telegram_ids_input.setToolTip(
+            "Администраторы Telegram\n"
             "Telegram ID администраторов через запятую. "
             "Эти ID получают админские права; priority >= 100 остаётся совместимостью."
         )
-        self.admin_telegram_ids_container = QWidget()
-        admin_ids_layout = QHBoxLayout()
-        admin_ids_layout.setContentsMargins(8, 0, 0, 0)
-        admin_ids_layout.setSpacing(0)
-        admin_ids_layout.addWidget(self.admin_telegram_ids_input, 1)
-        self.admin_telegram_ids_container.setLayout(admin_ids_layout)
-        basic_settings_layout.addWidget(self.admin_telegram_ids_container)
 
-        prompt_label = QLabel("Системный промпт")
-        prompt_label.setObjectName("settingsAccentLabel")
-        prompt_label.setStyleSheet("font-weight: 700;")
-        prompt_label.setContentsMargins(8, 0, 0, 0)
-        basic_settings_layout.addWidget(prompt_label)
+        self.token_label = label("Telegram Token", "muted")
+        self.token_container = QWidget()
+        token_lay = QVBoxLayout(self.token_container)
+        token_lay.setContentsMargins(0, 0, 0, 0)
+        token_lay.setSpacing(4)
+        token_lay.addWidget(self.token_label)
+        token_lay.addWidget(self.telegram_token_input)
+        self.admin_telegram_ids_container = _caption_field("Администраторы Telegram", self.admin_telegram_ids_input)
+
+        credentials = QGridLayout()
+        credentials.setHorizontalSpacing(14)
+        credentials.setColumnStretch(0, 1)
+        credentials.setColumnStretch(1, 1)
+        credentials.addWidget(self.token_container, 0, 0)
+        credentials.addWidget(self.admin_telegram_ids_container, 0, 1)
+        lay.addLayout(credentials)
+
+        lay.addWidget(self._divider())
+
+        # Системный промпт: заголовок с кнопками, предпросмотр, статус
+        prompt_head = QHBoxLayout()
+        prompt_head.setSpacing(8)
+        prompt_head.addWidget(label("Системный промпт", "h2"))
+        prompt_head.addStretch()
+        self.validate_prompt_btn = icon_button("Проверить промпт", "mdi6.check-decagram-outline")
+        self.validate_prompt_btn.setToolTip("Проверить промпт\nИщет ошибки в системном промпте и оценивает размер в токенах.")
+        self.validate_prompt_btn.clicked.connect(self.validate_system_prompt)
+        self.edit_prompt_btn = icon_button("Редактировать", "mdi6.pencil-outline")
+        self.edit_prompt_btn.setToolTip("Редактировать промпт\nОткрывает отдельный редактор с плейсхолдерами и шаблонами.")
+        self.edit_prompt_btn.clicked.connect(self.open_system_prompt_editor)
+        prompt_head.addWidget(self.validate_prompt_btn)
+        prompt_head.addWidget(self.edit_prompt_btn)
+        lay.addLayout(prompt_head)
 
         self.system_prompt_input = QTextEdit()
         self.system_prompt_input.setReadOnly(True)
         self.system_prompt_input.setPlaceholderText('Системный промпт (пустой = без промпта). Поддерживает плейсхолдеры.')
-        self.system_prompt_input.setToolTip("Текущий System Prompt. Для редактирования откройте отдельный редактор.")
-        self.system_prompt_input.setFixedHeight(68)
+        self.system_prompt_input.setToolTip("Текущий System Prompt\nДля редактирования откройте отдельный редактор.")
+        self.system_prompt_input.setFixedHeight(96)
+        lay.addWidget(self.system_prompt_input)
 
-        self.prompt_container = QWidget()
-        prompt_layout = QHBoxLayout()
-        prompt_layout.setContentsMargins(8, 0, 0, 0)
-        prompt_layout.setSpacing(6)
-        prompt_layout.addWidget(self.system_prompt_input, 1)
-        prompt_actions_layout = QVBoxLayout()
-        prompt_actions_layout.setSpacing(6)
-        prompt_actions_layout.addStretch()
-        self.edit_prompt_btn = QPushButton("Редактировать")
-        self.edit_prompt_btn.setMaximumWidth(140)
-        self.edit_prompt_btn.setFixedHeight(28)
-        self.edit_prompt_btn.clicked.connect(self.open_system_prompt_editor)
-        self.validate_prompt_btn = QPushButton("Проверить промпт")
-        self.validate_prompt_btn.setMaximumWidth(140)
-        self.validate_prompt_btn.setFixedHeight(28)
-        self.validate_prompt_btn.setToolTip("Проверить текущий System Prompt на ошибки")
-        self.validate_prompt_btn.clicked.connect(self.validate_system_prompt)
-        prompt_actions_layout.addWidget(self.edit_prompt_btn)
-        prompt_actions_layout.addWidget(self.validate_prompt_btn)
-        prompt_actions_layout.addStretch()
-        prompt_layout.addLayout(prompt_actions_layout)
-        self.prompt_container.setLayout(prompt_layout)
-        basic_settings_layout.addWidget(self.prompt_container)
-
-        self.prompt_status_label = QLabel()
+        self.prompt_status_label = label("", "muted")
         self.prompt_status_label.setWordWrap(True)
-        self.prompt_status_label.setStyleSheet("color: #9AA6B2; font-size: 11px;")
-        self.prompt_status_label.setContentsMargins(8, 0, 8, 0)
-        basic_settings_layout.addWidget(self.prompt_status_label)
+        lay.addWidget(self.prompt_status_label)
         self.refresh_system_prompt_status()
+        return frame
+
+    @staticmethod
+    def _divider() -> QFrame:
+        line = QFrame()
+        line.setObjectName("divider")
+        line.setFrameShape(QFrame.Shape.HLine)
+        return line
+
+    def _build_generation_card(self) -> QFrame:
+        frame, lay = card()
+        lay.setSpacing(12)
+        lay.addWidget(label("Генерация", "h2"))
 
         self.temperature_input = QLineEdit()
         self.temperature_input.setPlaceholderText('0.7')
         self.temperature_input.setValidator(QDoubleValidator(0.0, 2.0, 2))
-        self.temperature_input.setToolTip("Управляет случайностью генерации.\nБолее высокие значения делают вывод более разнообразным, низкие — более детерминированным")
+        self.temperature_input.setToolTip("Temperature\nУправляет случайностью генерации.\nБолее высокие значения делают вывод более разнообразным, низкие — более детерминированным")
 
         self.top_p_input = QLineEdit()
         self.top_p_input.setPlaceholderText('0.95')
         self.top_p_input.setValidator(QDoubleValidator(0.0, 1.0, 2))
-        self.top_p_input.setToolTip("Sampling с nucleus (top-p). Альтернатива temperature.")
+        self.top_p_input.setToolTip("Top P\nSampling с nucleus (top-p). Альтернатива temperature.")
 
         self.top_k_input = QLineEdit()
         self.top_k_input.setPlaceholderText('40')
         self.top_k_input.setValidator(QIntValidator(0, 100))
-        self.top_k_input.setToolTip("Количество токенов с наивысшей вероятностью для выбора следующего токена.")
+        self.top_k_input.setToolTip("Top K\nКоличество токенов с наивысшей вероятностью для выбора следующего токена.")
 
         self.max_tokens_input = QLineEdit()
         self.max_tokens_input.setPlaceholderText('1024')
         self.max_tokens_input.setValidator(QIntValidator(100, 10000))
-        self.max_tokens_input.setToolTip("Максимальное количество токенов в ответе.")
+        self.max_tokens_input.setToolTip("Max Tokens\nМаксимальное количество токенов в ответе.")
 
         self.repeat_penalty_input = QLineEdit()
         self.repeat_penalty_input.setPlaceholderText('1.1')
         self.repeat_penalty_input.setValidator(QDoubleValidator(0.0, 2.0, 2))
-        self.repeat_penalty_input.setToolTip("Штраф за повторение слов и фраз.")
+        self.repeat_penalty_input.setToolTip("Repeat Penalty\nШтраф за повторение слов и фраз.")
 
         self.presence_penalty_input = QLineEdit()
         self.presence_penalty_input.setPlaceholderText('0.0')
         self.presence_penalty_input.setValidator(QDoubleValidator(-2.0, 2.0, 2))
-        self.presence_penalty_input.setToolTip("Штраф за повторение одной и той же темы.")
+        self.presence_penalty_input.setToolTip("Presence Penalty\nШтраф за повторение одной и той же темы.")
 
         self.frequency_penalty_input = QLineEdit()
         self.frequency_penalty_input.setPlaceholderText('0.0')
         self.frequency_penalty_input.setValidator(QDoubleValidator(-2.0, 2.0, 2))
-        self.frequency_penalty_input.setToolTip("Штраф за частое повторение одних и тех же фраз.")
+        self.frequency_penalty_input.setToolTip("Frequency Penalty\nШтраф за частое повторение одних и тех же фраз.")
 
         self.seed_input = QLineEdit()
         self.seed_input.setPlaceholderText('-1')
         self.seed_input.setValidator(QIntValidator(-1, 999999))
-        self.seed_input.setToolTip("Фиксированный seed делает одинаковые запросы воспроизводимыми. -1 означает случайный seed.")
+        self.seed_input.setToolTip("Seed\nФиксированный seed делает одинаковые запросы воспроизводимыми. -1 означает случайный seed.")
 
-        self.balancing_strategy_combo = QComboBox()
+        self.balancing_strategy_combo = FxComboBox()
         self.balancing_strategy_combo.addItems([
             "round_robin", "random_weighted", "least_used"
         ])
-        self.balancing_strategy_combo.setToolTip("Стратегия распределения запросов между моделями.")
+        self.balancing_strategy_combo.setToolTip(
+            "Стратегия балансировки\nСтратегия распределения запросов между моделями:\n"
+            "round_robin — по кругу, random_weighted — случайно с учётом веса, least_used — наименее загруженная."
+        )
 
-        self.generation_frame = QFrame()
-        self.generation_frame.setObjectName("generationCard")
-        self.generation_frame.setFrameShape(QFrame.Shape.NoFrame)
-        generation_layout = QVBoxLayout(self.generation_frame)
-        generation_layout.setContentsMargins(12, 12, 12, 10)
-        generation_layout.setSpacing(6)
-
-        top_generation_grid = QGridLayout()
-        top_generation_grid.setHorizontalSpacing(10)
-        top_generation_grid.setVerticalSpacing(6)
-
-        top_fields = [
-            ("Temperature", self.temperature_input, 132),
-            ("Top P", self.top_p_input, 132),
-            ("Top K", self.top_k_input, 132),
-            ("Repeat Penalty", self.repeat_penalty_input, 132),
-            ("Presence Penalty", self.presence_penalty_input, 132),
-            ("Frequency Penalty", self.frequency_penalty_input, 132),
+        main_grid = QGridLayout()
+        main_grid.setHorizontalSpacing(14)
+        main_grid.setVerticalSpacing(10)
+        for column in range(3):
+            main_grid.setColumnStretch(column, 1)
+        main_fields = [
+            ("Temperature", self.temperature_input),
+            ("Top P", self.top_p_input),
+            ("Top K", self.top_k_input),
+            ("Max Tokens", self.max_tokens_input),
+            ("Стратегия балансировки", self.balancing_strategy_combo),
         ]
+        for index, (caption, widget) in enumerate(main_fields):
+            main_grid.addWidget(self.create_compact_setting(caption, widget, 0), index // 3, index % 3)
+        lay.addLayout(main_grid)
 
-        for index, (label_text, widget, width) in enumerate(top_fields):
-            row = index // 2
-            column = index % 2
-            top_generation_grid.addWidget(self.create_compact_setting(label_text, widget, width), row, column)
-            top_generation_grid.setColumnStretch(column, 1)
-
-        generation_layout.addLayout(top_generation_grid)
-
-        self.generation_divider = QFrame()
-        self.generation_divider.setObjectName("generationDivider")
-        generation_layout.addWidget(self.generation_divider)
-
-        bottom_generation_grid = QGridLayout()
-        bottom_generation_grid.setHorizontalSpacing(10)
-        bottom_generation_grid.setVerticalSpacing(6)
-
-        bottom_fields = [
-            ("Max Tokens", self.max_tokens_input, 132),
-            ("Seed", self.seed_input, 132),
-            ("Стратегия балансировки", self.balancing_strategy_combo, 132),
+        # Редко нужные параметры — под раскрывающейся секцией
+        extra_box = QWidget()
+        extra_grid = QGridLayout(extra_box)
+        extra_grid.setContentsMargins(0, 0, 0, 0)
+        extra_grid.setHorizontalSpacing(14)
+        extra_grid.setVerticalSpacing(10)
+        for column in range(3):
+            extra_grid.setColumnStretch(column, 1)
+        extra_fields = [
+            ("Repeat Penalty", self.repeat_penalty_input),
+            ("Presence Penalty", self.presence_penalty_input),
+            ("Frequency Penalty", self.frequency_penalty_input),
+            ("Seed", self.seed_input),
         ]
+        for index, (caption, widget) in enumerate(extra_fields):
+            extra_grid.addWidget(self.create_compact_setting(caption, widget, 0), index // 3, index % 3)
+        self.extra_generation = Collapsible("Дополнительно", extra_box, expanded=False)
+        lay.addWidget(self.extra_generation)
+        return frame
 
-        for index, (label_text, widget, width) in enumerate(bottom_fields):
-            bottom_generation_grid.addWidget(self.create_compact_setting(label_text, widget, width), 0, index)
-            bottom_generation_grid.setColumnStretch(index, 1)
+    def _build_models_card(self) -> QFrame:
+        frame, lay = card()
+        lay.setSpacing(12)
 
-        generation_layout.addLayout(bottom_generation_grid)
-        basic_settings_layout.addWidget(self.generation_frame)
-        basic_settings_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        basic_settings_group.setLayout(basic_settings_layout)
-        content_layout.addWidget(basic_settings_group)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        titles.addWidget(label("LM Модели", "h2"))
+        self.models_summary_label = label("", "muted")
+        self.models_summary_label.setWordWrap(True)  # длинная сводка не должна раздвигать карточку
+        titles.addWidget(self.models_summary_label)
+        head.addLayout(titles)
+        head.addStretch()
+        self.add_model_button = icon_button("Добавить", "mdi6.plus")
+        self.edit_model_button = icon_button("Редактировать", "mdi6.pencil-outline")
+        self.delete_model_button = icon_button("Удалить", "mdi6.delete-outline", "danger")
+        self.add_model_button.setToolTip("Добавить модель\nОткрывает форму подключения новой модели.")
+        self.edit_model_button.setToolTip("Редактировать модель\nИзменяет выбранную в таблице модель.")
+        self.delete_model_button.setToolTip("Удалить модель\nУдаляет выбранную модель после подтверждения.")
+        head.addWidget(self.add_model_button)
+        head.addWidget(self.edit_model_button)
+        head.addWidget(self.delete_model_button)
+        lay.addLayout(head)
 
-        # Секция управления моделями
-        models_group = QGroupBox("LM Модели")
-        models_layout = QVBoxLayout()
-        models_layout.setContentsMargins(10, 12, 10, 8)
-        models_layout.setSpacing(8)
-        
         # Таблица моделей
-        self.models_table = QTableWidget()
+        self.models_table = ModelsTable()
         self.models_table.setColumnCount(10)
         self.models_table.setHorizontalHeaderLabels([
             "ID", "Тип", "API Key", "Base URL", "Вес", "Запросы", "Ошибки", "VLM", "Думание", "Активна"
         ])
-        self.models_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.models_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.models_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.models_table.setMinimumHeight(84)
+        self.models_table.verticalHeader().setVisible(False)
+        self.models_table.verticalHeader().setDefaultSectionSize(50)  # QSS даёт ячейке отступ 6px сверху/снизу
+        self.models_table.setShowGrid(False)
+        self.models_table.setAlternatingRowColors(True)
+        self.models_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.models_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.models_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.models_table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.models_table.setMinimumHeight(240)
         self.models_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.models_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.models_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
-        # Настройка размеров столбцов
-        self.models_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)  # ID
-        self.models_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Тип
-        self.models_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # API Key
-        self.models_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Base URL
-        self.models_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Вес
-        self.models_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Запросы
-        self.models_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Ошибки
-        self.models_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # VLM
-        self.models_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)  # Думание
-        self.models_table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)  # Активна
-        
-        self.models_table.setColumnWidth(0, 120)
-        
-        models_layout.addWidget(self.models_table, 1)
-        
-        # Кнопки управления моделями
-        models_buttons_layout = QHBoxLayout()
-        self.add_model_button = QPushButton("Добавить модель")
-        self.edit_model_button = QPushButton("Редактировать")
-        self.delete_model_button = QPushButton("Удалить")
-        for button in (self.add_model_button, self.edit_model_button, self.delete_model_button):
-            button.setFixedHeight(28)
-        models_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        models_buttons_layout.setSpacing(6)
-        
-        models_buttons_layout.addWidget(self.add_model_button)
-        models_buttons_layout.addWidget(self.edit_model_button)
-        models_buttons_layout.addWidget(self.delete_model_button)
-        models_buttons_layout.addStretch()
-        models_layout.addLayout(models_buttons_layout)
-        
-        models_group.setLayout(models_layout)
-        models_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        models_group.setMinimumHeight(130)
-        content_layout.addWidget(models_group, 1)
-        main_layout.addLayout(content_layout, 1)
 
-        self.setLayout(main_layout)
-        
-        # Загрузка текущих настроек
-        self.load_settings()
-        
-        # Привязка событий
-        self.save_button.clicked.connect(self.save_settings)
-        self.add_model_button.clicked.connect(self.add_model)
-        self.edit_model_button.clicked.connect(self.edit_model)
-        self.delete_model_button.clicked.connect(self.delete_model)
+        # Размеры столбцов: ID/ключ/URL тянутся, остальные — компактные (колонки с виджетами — фиксированной ширины)
+        header = self.models_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        for column in (0, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 4, 5, 6):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        for column, width in ((7, 68), (8, 100), (9, 76)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            self.models_table.setColumnWidth(column, width)
 
-    def apply_theme(self, is_oled: bool, accent_color: str):
-        """Обновляет проблемные зоны при смене темы."""
-        # Стили теперь наследуются от главного окна AdminPanelBase.
-        # Мы больше не устанавливаем жесткие стили на scroll_area и scroll_content,
-        # чтобы не блокировать отображение границ QGroupBox.
-        
-        if is_oled:
-            border_color = "#333333"
-            header_bg = "#111111"
-            bg_color = "#000000"
-        else:
-            border_color = "#444444"
-            header_bg = "#252526"
-            bg_color = "#1e1e1e"
-            
-        # Обновляем таблицу моделей отдельно для применения акцентов и заголовков
-        self.models_table.setStyleSheet(f"""
-            QHeaderView::section {{
-                background-color: {header_bg};
-                color: #FFFFFF;
-                border: 1px solid {border_color};
-                font-weight: bold;
-            }}
-            QHeaderView {{
-                background-color: {bg_color};
-            }}
-            QTableCornerButton::section {{
-                background-color: {bg_color};
-                border: 1px solid {border_color};
-            }}
-            QHeaderView::section:vertical {{
-                background-color: {bg_color};
-                border: 1px solid {border_color};
-            }}
-            QTableWidget {{
-                gridline-color: {border_color};
-                background-color: {bg_color};
-                color: #FFFFFF;
-                border: 1px solid {border_color};
-            }}
-        """)
+        lay.addWidget(self.models_table, 1)
+        return frame
 
-        self.generation_frame.setStyleSheet("")
-        self.generation_divider.setStyleSheet(
-            f"background-color: {border_color}; min-height: 1px; max-height: 1px; border: none;"
-        )
-        for label in self.findChildren(QLabel, "settingsAccentLabel"):
-            label.setStyleSheet(f"font-weight: 700; color: {accent_color};")
-
+    def apply_theme(self, is_oled: bool = False, accent_color: str = ""):
+        """Оставлен для совместимости: внешний вид задаёт глобальный QSS дизайн-системы, ничего делать не нужно."""
 
     # Методы для умного скрытия токена
     def token_focus_in(self, event):
@@ -976,29 +983,11 @@ class SettingsPanel(QWidget):
         self.telegram_token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.token_hide_timer.stop()
 
-    def create_compact_setting(self, label_text, widget, max_width):
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        if label_text:
-            label = QLabel(label_text)
-            label.setWordWrap(False)
-            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            label.setStyleSheet("font-size: 12px; color: #AAAAAA;")
-            label.setMinimumHeight(18)
-            layout.addWidget(label)
-        else:
-            layout.addSpacing(18)
-
-        widget.setMinimumWidth(max_width)
-        widget.setFixedHeight(28)
-        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(widget)
-        container.setMinimumHeight(48)
-        return container
+    def create_compact_setting(self, label_text, widget, max_width=0):
+        """Поле с подписью над ним. max_width оставлен для совместимости (ширину задаёт сетка)."""
+        if not label_text:
+            return widget
+        return _caption_field(label_text, widget)
 
     def set_system_prompt_preview(self, prompt_text):
         self.system_prompt_input.setPlainText(prompt_text or "")
@@ -1167,88 +1156,124 @@ class SettingsPanel(QWidget):
         # Загружаем таблицу моделей
         self.load_models_table()
 
+
+    @staticmethod
+    def _cell_holder(widget, align=Qt.AlignmentFlag.AlignCenter):
+        """Ячейка таблицы с виджетом внутри (по центру/левому краю строки)."""
+        holder = QWidget()
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(widget, 0, align | Qt.AlignmentFlag.AlignVCenter)
+        return holder
+
+    @staticmethod
+    def _model_reasoning_mode(model):
+        reasoning_mode = model.get('reasoning_mode')
+        if not reasoning_mode:
+            reasoning_mode = model.get('reasoning_effort', 'medium') if model.get('reasoning_enabled') else 'default'
+            if reasoning_mode == 'none':
+                reasoning_mode = 'off'
+        return reasoning_mode
+
     def load_models_table(self):
         settings = self.settings_manager.get_settings()
         models = settings.get('models', [])
         stats = get_model_usage_stats()
-        
-        self.models_table.setRowCount(len(models))
-        
+
+        # Данные не менялись — таблицу не пересоздаём (сохраняем выделение и фокус)
+        snapshot = repr((models, {m.get('id', ''): stats.get(m.get('id', ''), {}) for m in models}))
+        if snapshot == self._models_snapshot:
+            return
+        self._models_snapshot = snapshot
+
+        selected_row = self.models_table.currentRow()
+        self.models_table.setUpdatesEnabled(False)
+        try:
+            self.models_table.setRowCount(0)
+            self.models_table.setRowCount(len(models))
+            self._fill_models_table(models, stats)
+            if 0 <= selected_row < len(models):
+                self.models_table.selectRow(selected_row)
+        finally:
+            self.models_table.setUpdatesEnabled(True)
+
+        total_requests = sum(stats.get(m.get('id', ''), {}).get('requests', 0) for m in models)
+        total_errors = sum(stats.get(m.get('id', ''), {}).get('errors', 0) for m in models)
+        active = sum(1 for m in models if m.get('active', True))
+        self.models_summary_label.setText(
+            f"Моделей: {len(models)} · активных: {active} · запросов: {total_requests} · ошибок: {total_errors}"
+        )
+
+    def _fill_models_table(self, models, stats):
         # Короткие обозначения типов API для таблицы
         api_type_labels = {
             'openai': 'OAI',
             'anthropic': 'Claude',
         }
-        
+
+        def centered(text, tooltip=""):
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if tooltip:
+                item.setToolTip(tooltip)
+            return item
+
         for row, model in enumerate(models):
             model_id = model.get('id', '')
             model_stats = stats.get(model_id, {"requests": 0, "errors": 0})
-            
+
             # ID
-            self.models_table.setItem(row, 0, QTableWidgetItem(model_id))
-            
+            id_item = QTableWidgetItem(model_id)
+            id_item.setToolTip(f"{model_id}\n{model.get('base_url', '')}".rstrip())
+            self.models_table.setItem(row, 0, id_item)
+
             # Тип API
             api_type = model.get('api_type', 'openai')
-            type_item = QTableWidgetItem(api_type_labels.get(api_type, api_type))
-            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.models_table.setItem(row, 1, type_item)
-            
-            # API Key
+            self.models_table.setItem(row, 1, centered(api_type_labels.get(api_type, api_type)))
+
+            # API Key (маска: видны только последние 4 символа)
             api_key = model.get('api_key', '')
             masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if len(api_key) > 4 else api_key
             self.models_table.setItem(row, 2, QTableWidgetItem(masked_key))
-            
+
             # Base URL
-            self.models_table.setItem(row, 3, QTableWidgetItem(model.get('base_url', '')))
-            
-            # Weight
-            weight_item = QTableWidgetItem(str(model.get('weight', 1)))
-            weight_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.models_table.setItem(row, 4, weight_item)
-            
-            # Requests
-            requests_item = QTableWidgetItem(str(model_stats["requests"]))
-            requests_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.models_table.setItem(row, 5, requests_item)
-            
-            # Errors
-            errors_item = QTableWidgetItem(str(model_stats["errors"]))
-            errors_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.models_table.setItem(row, 6, errors_item)
+            base_url = model.get('base_url', '')
+            url_item = QTableWidgetItem(base_url)
+            url_item.setToolTip(base_url)
+            self.models_table.setItem(row, 3, url_item)
 
-            # VLM support
-            vlm_item = QTableWidgetItem("✓" if model.get('supports_vision') else "—")
-            vlm_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.models_table.setItem(row, 7, vlm_item)
+            # Вес, запросы, ошибки
+            self.models_table.setItem(row, 4, centered(str(model.get('weight', 1))))
+            self.models_table.setItem(row, 5, centered(str(model_stats["requests"])))
+            self.models_table.setItem(row, 6, centered(str(model_stats["errors"])))
 
-            # Reasoning
-            reasoning_mode = model.get('reasoning_mode')
-            if not reasoning_mode:
-                reasoning_mode = model.get('reasoning_effort', 'medium') if model.get('reasoning_enabled') else 'default'
-                if reasoning_mode == 'none':
-                    reasoning_mode = 'off'
-            reasoning_item = QTableWidgetItem(reasoning_mode)
-            reasoning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.models_table.setItem(row, 8, reasoning_item)
+            # VLM: бейдж, если модель понимает изображения
+            if model.get('supports_vision'):
+                vlm = StatusBadge("VLM", "info", pulse=False)
+                vlm.setToolTip("Поддержка изображений\nМодель получает картинки из истории и запросов.")
+                self.models_table.setCellWidget(row, 7, self._cell_holder(vlm))
+            else:
+                self.models_table.setItem(row, 7, centered("—"))
 
-            # Active status
-            active = model.get('active', True)
-            checkbox = QCheckBox()
-            checkbox.setChecked(active)
-            checkbox.stateChanged.connect(lambda state, r=row: self.toggle_model_active(r, state == 2))
+            # Думание: бейдж с режимом, если он задан
+            reasoning_mode = self._model_reasoning_mode(model)
+            if reasoning_mode and reasoning_mode != 'default':
+                badge = StatusBadge(reasoning_mode, "warn" if reasoning_mode != 'off' else "idle", pulse=False)
+                badge.setToolTip(f"Думание модели\nРежим: {reasoning_mode}")
+                self.models_table.setCellWidget(row, 8, self._cell_holder(badge))
+            else:
+                self.models_table.setItem(row, 8, centered("—"))
 
-            checkbox_widget = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox_layout.addWidget(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            
-            self.models_table.setCellWidget(row, 9, checkbox_widget)
+            # Активность: переключатель в ячейке (подписка после установки значения, чтобы не было ложного сигнала)
+            switch = Switch(bool(model.get('active', True)))
+            switch.setToolTip("Активна\nЕсли выключено, модель не используется для обработки запросов.")
+            switch.toggled.connect(lambda on, r=row: self.toggle_model_active(r, on))
+            self.models_table.setCellWidget(row, 9, self._cell_holder(switch))
 
     def toggle_model_active(self, row, active):
         """Переключить активность модели"""
         try:
-            # 🆕 Используем ModelService
+            # Используем ModelService
             success, message = ModelService.toggle_model_active(row, active)
             
             if not success:
@@ -1264,20 +1289,10 @@ class SettingsPanel(QWidget):
 
     def add_model(self):
         dialog = ModelDialog(self)
-        # Применяем тему OLED/стандартную
-        parent_base = self.parent()
-        while parent_base and not hasattr(parent_base, 'apply_theme'):
-            parent_base = parent_base.parent()
-        if parent_base and hasattr(parent_base, 'apply_theme'):
-            # Мы можем использовать ту же логику стилизации, что и для других диалогов
-            # Но так как ModelDialog это QDialog, общие стили из AdminPanelBase уже подхватятся
-            # если мы правильно прописали их в apply_theme родителя.
-            pass
-            
         if dialog.exec() == QDialog.DialogCode.Accepted:
             model_data = dialog.get_model_data()
             
-            # 🆕 Используем ModelService для добавления
+            # Используем ModelService для добавления
             success, message = ModelService.add_model(model_data)
             
             if not success:
@@ -1308,7 +1323,7 @@ class SettingsPanel(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             model_data = dialog.get_model_data()
             
-            # 🆕 Используем ModelService для редактирования
+            # Используем ModelService для редактирования
             success, message = ModelService.edit_model(current_row, model_data)
             
             if not success:
@@ -1346,7 +1361,7 @@ class SettingsPanel(QWidget):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # 🆕 Используем ModelService для удаления
+            # Используем ModelService для удаления
             success, message = ModelService.delete_model(current_row)
             
             if not success:
@@ -1442,4 +1457,10 @@ class SettingsPanel(QWidget):
         QMessageBox.critical(self, "Ошибка", message)
 
     def show_message(self, message):
-        QMessageBox.information(self, "Информация", message) 
+        """Сообщение об успехе: всплывающее уведомление окна (если оно есть), иначе обычный диалог."""
+        window = self.window()
+        toast = getattr(window, "toast", None)
+        if toast is not None and window.isVisible():
+            toast.show_message(message, hold_ms=3500)
+        else:
+            QMessageBox.information(self, "Информация", message)
