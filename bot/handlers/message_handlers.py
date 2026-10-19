@@ -28,7 +28,7 @@ from utils.database.backlog_writer import backlog_message_writer
 from utils import server_state, stats
 from utils.database.database_manager import DatabaseManager
 from utils.logger import setup_logger
-from utils.voice_processor import voice_processor
+from utils.voice_processor import VoskNotInstalledError, voice_processor
 
 logger = setup_logger(__name__)
 
@@ -540,6 +540,16 @@ async def message_handler(message: types.Message):
                     if addressing.should_process:
                         await send_ephemeral_reply(message, "Не удалось распознать речь в голосовом сообщении или кружочке.")
                     return
+            except VoskNotInstalledError:
+                reason = (
+                    "Локальный движок распознавания речи (Vosk) не установлен. "
+                    "Владельцу бота нужно установить vosk или выбрать OpenAI/Groq во вкладке «Голос»."
+                )
+                logger.error("Распознавание речи недоступно: Vosk не установлен")
+                db.voice.add_transcription(**stt_log, status="error", error=reason)
+                if addressing.should_process:
+                    await send_ephemeral_reply(message, reason)
+                return
             except Exception as exc:
                 logger.error(f"Ошибка распознавания речи: {exc}")
                 db.voice.add_transcription(**stt_log, status="error", error=str(exc))

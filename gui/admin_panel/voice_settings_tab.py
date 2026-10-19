@@ -1,5 +1,6 @@
 # gui/admin_panel/voice_settings_tab.py
 
+import importlib.util
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QFileDialog, QSizePolicy,
@@ -89,6 +90,10 @@ class VoiceSettingsTab(QWidget):
         self.vosk_group, vosk_lay = card()
         vosk_lay.addWidget(label("Настройки Vosk (локально)", "h2"))
 
+        # Одна строка-подсказка, только если пакет vosk не установлен
+        self.lbl_vosk_missing = BadgeSlot("Vosk не установлен: pip install vosk (см. requirements-local-stt.txt)", "error")
+        vosk_lay.addWidget(self.lbl_vosk_missing)
+
         # Проверка FFmpeg: статус — бейдж, а не текст с галочкой
         self.lbl_ffmpeg_status = BadgeSlot("Проверка FFmpeg...", "idle")
         ffmpeg_row = QHBoxLayout()
@@ -156,6 +161,7 @@ class VoiceSettingsTab(QWidget):
 
     def _on_engine_changed(self, engine):
         self.vosk_group.setVisible(engine == "vosk")
+        self.lbl_vosk_missing.setVisible(importlib.util.find_spec("vosk") is None)
         self.cloud_group.setVisible(engine in ["openai", "groq", "custom"])
         self.le_custom_base_url.setVisible(engine == "custom")
         if self.lbl_custom_base_url:

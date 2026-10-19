@@ -65,6 +65,10 @@ def resolve_ffmpeg_path() -> str | None:
 
     return shutil.which("ffmpeg")
 
+class VoskNotInstalledError(RuntimeError):
+    """Локальный движок Vosk не установлен или его нативная библиотека не загрузилась."""
+
+
 class VoiceProcessor:
     def __init__(self):
         self.model = None
@@ -81,10 +85,9 @@ class VoiceProcessor:
             return self._vosk_module
         except Exception as e:
             self._vosk_import_error = e
-            logger.warning("Vosk недоступен: %s", e)
-            raise RuntimeError(
+            raise VoskNotInstalledError(
                 "Vosk не установлен или его нативная библиотека не загрузилась. "
-                "Установите локальные STT-зависимости либо выберите openai, groq или custom."
+                "Установите локальные STT-зависимости (requirements-local-stt.txt) либо выберите openai, groq или custom."
             ) from e
 
     def _ensure_model_loaded(self):
