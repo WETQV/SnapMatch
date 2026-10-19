@@ -356,8 +356,11 @@ class SecretaryTab(QWidget):
         db = DatabaseManager()
         try:
             profiles = db.secretary.list_profiles()
+            # Имена владельцев берём через уже открытое соединение (раньше — новое на каждую строку)
+            display_names = [self._profile_display_name(p, db) for p in profiles]
         finally:
             db.close()
+        self.table.setUpdatesEnabled(False)
         self.table.setRowCount(len(profiles))
         selected_row = -1
         for row, profile in enumerate(profiles):
@@ -365,9 +368,10 @@ class SecretaryTab(QWidget):
             if select_owner_id is not None and owner_id == select_owner_id:
                 selected_row = row
             self.table.setItem(row, 0, self._table_item(owner_id))
-            self.table.setItem(row, 1, self._table_item(self._profile_display_name(profile)))
+            self.table.setItem(row, 1, self._table_item(display_names[row]))
             self.table.setItem(row, 2, self._table_item("да" if profile.get("enabled") else "нет", centered=True))
             self.table.setItem(row, 3, self._table_item(profile.get("response_mode") or "draft", centered=True))
+        self.table.setUpdatesEnabled(True)
         if selected_row >= 0:
             self.table.selectRow(selected_row)
         elif profiles:
@@ -814,16 +818,17 @@ class SecretaryTab(QWidget):
         full_name = " ".join(part for part in [user.get("first_name") or "", user.get("last_name") or ""] if part).strip()
         return full_name or user.get("username") or ""
 
-    def _profile_display_name(self, profile):
+    def _profile_display_name(self, profile, db=None):
         display_name = profile.get("owner_display_name") or ""
         if display_name:
             return display_name
         try:
-            db = DatabaseManager()
+            owner_db = db or DatabaseManager()
             try:
-                user = db.users.get_user_by_telegram_id(int(profile.get("owner_telegram_id")))
+                user = owner_db.users.get_user_by_telegram_id(int(profile.get("owner_telegram_id")))
             finally:
-                db.close()
+                if db is None:
+                    owner_db.close()
             return self._user_display_name(user)
         except Exception:
             return ""

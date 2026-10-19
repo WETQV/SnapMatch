@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from gui.async_worker import run_in_background
 from bot.handlers.services.mcp_permissions import allowed_tools_for_context
 from bot.handlers.services.mcp_registry import normalize_server_config, preview_servers
 from bot.handlers.services.mcp_runtime import (
@@ -479,16 +480,40 @@ class McpTab(QWidget):
         if self.current_row < 0 or self.current_row >= len(servers):
             QMessageBox.information(self, "MCP", "Выберите MCP-сервер.")
             return
-        try:
-            capabilities = discover_server_capabilities(servers[self.current_row])
-        except McpRuntimeError as e:
-            QMessageBox.warning(self, "MCP discovery", str(e))
-            return
-        except Exception as e:
-            logger.error(f"MCP discovery failed: {e}")
-            QMessageBox.warning(self, "MCP discovery", f"Не удалось проверить сервер: {e}")
-            return
+        # Обращение к серверу (до 20 с) идёт в фоне — окно не замирает
+        row = self.current_row
+        server_cfg = servers[row]
+        self._run_busy(
+            lambda: discover_server_capabilities(server_cfg),
+            lambda caps: self._on_discovered(caps, row),
+            lambda msg: QMessageBox.warning(self, "MCP discovery", f"Не удалось проверить сервер: {msg}"),
+        )
 
+    def _run_busy(self, fn, on_done, on_error):
+        """Запускает fn в фоне, пока кнопки управления серверами заблокированы."""
+        buttons = (self.start_button, self.stop_button, self.discover_button)
+        for button in buttons:
+            button.setEnabled(False)
+
+        def _restore():
+            for button in buttons:
+                button.setEnabled(True)
+
+        def _done(result):
+            _restore()
+            on_done(result)
+
+        def _failed(message):
+            _restore()
+            on_error(message)
+
+        run_in_background(fn, on_done=_done, on_error=_failed)
+
+    def _on_discovered(self, capabilities, row):
+        servers = self._servers()
+        if row < 0 or row >= len(servers):
+            return
+        self.current_row = row
         discovered_tools = capabilities.get("tools") or []
         existing_tools = {
             str(tool.get("name") or "").strip(): tool
@@ -538,27 +563,23 @@ class McpTab(QWidget):
         if self.current_row < 0 or self.current_row >= len(servers):
             QMessageBox.information(self, "MCP", "Выберите MCP-сервер.")
             return
-        try:
-            result = start_server_process(servers[self.current_row])
-        except McpRuntimeError as e:
-            QMessageBox.warning(self, "MCP start", str(e))
-            self.refresh_audit()
-            self.load_settings(select_name=selected_name)
-            return
-        except Exception as e:
-            logger.error(f"MCP start failed: {e}")
-            QMessageBox.warning(self, "MCP start", f"Не удалось запустить сервер: {e}")
-            self.refresh_audit()
-            self.load_settings(select_name=selected_name)
-            return
+        server_cfg = servers[self.current_row]
 
-        self.refresh_audit()
-        self.load_settings(select_name=selected_name)
-        QMessageBox.information(
-            self,
-            "MCP start",
-            f"Статус: {result.get('status')}\n{result.get('details') or ''}",
-        )
+        def _failed(message):
+            QMessageBox.warning(self, "MCP start", f"Не удалось запустить сервер: {message}")
+            self.refresh_audit()
+            self.load_settings(select_name=selected_name)
+
+        def _started(result):
+            self.refresh_audit()
+            self.load_settings(select_name=selected_name)
+            QMessageBox.information(
+                self,
+                "MCP start",
+                f"Статус: {result.get('status')}\n{result.get('details') or ''}",
+            )
+
+        self._run_busy(lambda: start_server_process(server_cfg), _started, _failed)
 
     def stop_server(self):
         selected_name = self._selected_server_name()
@@ -566,22 +587,23 @@ class McpTab(QWidget):
         if self.current_row < 0 or self.current_row >= len(servers):
             QMessageBox.information(self, "MCP", "Выберите MCP-сервер.")
             return
-        try:
-            result = stop_server_process(servers[self.current_row])
-        except Exception as e:
-            logger.error(f"MCP stop failed: {e}")
-            QMessageBox.warning(self, "MCP stop", f"Не удалось остановить сервер: {e}")
+        server_cfg = servers[self.current_row]
+
+        def _failed(message):
+            QMessageBox.warning(self, "MCP stop", f"Не удалось остановить сервер: {message}")
             self.refresh_audit()
             self.load_settings(select_name=selected_name)
-            return
 
-        self.refresh_audit()
-        self.load_settings(select_name=selected_name)
-        QMessageBox.information(
-            self,
-            "MCP stop",
-            f"Статус: {result.get('status')}\n{result.get('details') or ''}",
-        )
+        def _stopped(result):
+            self.refresh_audit()
+            self.load_settings(select_name=selected_name)
+            QMessageBox.information(
+                self,
+                "MCP stop",
+                f"Статус: {result.get('status')}\n{result.get('details') or ''}",
+            )
+
+        self._run_busy(lambda: stop_server_process(server_cfg), _stopped, _failed)
 
     def preview_access(self):
         try:

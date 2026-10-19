@@ -18,7 +18,7 @@ from utils import stats  # Импортируем модуль статисти�
 import datetime
 import logging
 import queue
-from PyQt6.QtGui import QFontInfo
+from PyQt6.QtGui import QFontInfo, QFontDatabase
 
 # Убран статический импорт для избежания циклического импорта
 # Импорт делается внутри функции update_message_history()
@@ -45,7 +45,10 @@ class ClickableWidget(QWidget):
         # Иконка-символ (заменяем картинку на Unicode символ)
         self.icon_label = QLabel()
         self.icon_label.setText("📊")  # Символ статистики
-        self.icon_label.setFont(QFont("Segoe UI Emoji", 16))
+        emoji_font = QFont()
+        emoji_font.setFamilies(["Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji"])
+        emoji_font.setPointSize(16)
+        self.icon_label.setFont(emoji_font)
         self.icon_label.setFixedSize(20, 20)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.icon_label)
@@ -332,13 +335,8 @@ class UserManagement(QWidget):
         self.logs_text.setWordWrapMode(QTextOption.WrapMode.WordWrap)
         self.logs_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # Моноширинный шрифт для ровного выравнивания
-        mono_font = QFont("Consolas")
-        mono_font.setStyleHint(QFont.StyleHint.Monospace)
-        # Если Consolas недоступен, используем fallback
-        if not QFontInfo(mono_font).exactMatch():
-            mono_font = QFont()
-            mono_font.setStyleHint(QFont.StyleHint.Monospace)
-            mono_font.setFamily("Courier New")
+        # Системный моноширинный шрифт (Consolas/Cascadia на Windows, DejaVu Sans Mono на Linux)
+        mono_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.logs_text.setFont(mono_font)
         logs_layout.addWidget(self.logs_text)
         
@@ -368,16 +366,24 @@ class UserManagement(QWidget):
         self.load_group_chats()
         self.update_stats()
 
+    def _refresh_if_visible(self):
+        if not self.isVisible():
+            return
+        self._refresh_visible_entity_list()
+        self.update_stats()
+
     def setup_timers(self):
         # Таймер для обновления пользователей и статистики каждые 5 секунд
         self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self._refresh_visible_entity_list)
-        self.update_timer.timeout.connect(self.update_stats)
+        # Не дёргаем БД и не перерисовываем таблицы, пока вкладка скрыта
+        self.update_timer.timeout.connect(self._refresh_if_visible)
         self.update_timer.start(5000)  # 5000 мс = 5 секунд
 
         # Таймер для обновления истории сообщений каждые 5 секунд
         self.history_timer = QTimer()
-        self.history_timer.timeout.connect(self.update_message_history)
+        self.history_timer.timeout.connect(
+            lambda: self.isVisible() and self.update_message_history()
+        )
         self.history_timer.start(5000)
         
         # Таймер для обновления логов каждую секунду
@@ -431,6 +437,12 @@ class UserManagement(QWidget):
         try:
             # 🆕 Используем UserService
             users = self.user_service.get_all_users()
+            # Данные не менялись — не пересоздаём таблицу (сохраняем фокус/выделение)
+            snapshot = repr(users)
+            if snapshot == getattr(self, '_users_snapshot', None):
+                return
+            self._users_snapshot = snapshot
+            self.users_table.setUpdatesEnabled(False)
             self.users_table.setRowCount(0)
             for row_number, user in enumerate(users):
                 self.users_table.insertRow(row_number)
@@ -463,12 +475,20 @@ class UserManagement(QWidget):
                         self.users_table.selectRow(row)
                         break
         except Exception as e:
+            self._users_snapshot = None
             logger.error(f"Ошибка загрузки пользователей: {e}")
+        finally:
+            self.users_table.setUpdatesEnabled(True)
 
     def load_group_chats(self):
         try:
             # 🆕 Используем UserService
             chats = self.user_service.get_group_chats()
+            snapshot = repr(chats)
+            if snapshot == getattr(self, '_chats_snapshot', None):
+                return
+            self._chats_snapshot = snapshot
+            self.groups_table.setUpdatesEnabled(False)
             self.groups_table.setRowCount(0)
             for row_number, chat in enumerate(chats):
                 self.groups_table.insertRow(row_number)
@@ -507,7 +527,10 @@ class UserManagement(QWidget):
                         break
 
         except Exception as e:
+            self._chats_snapshot = None
             logger.error(f"Ошибка загрузки групповых чатов: {e}")
+        finally:
+            self.groups_table.setUpdatesEnabled(True)
 
     def display_user_history(self, row, column):
         user_id_item = self.users_table.item(row, 1)  # Используем Telegram ID
@@ -864,14 +887,14 @@ class UserManagement(QWidget):
                 btn_width = 110
                 
                 open_file_btn = QPushButton("📄 Открыть")
-                open_file_btn.setFixedWidth(btn_width)
+                open_file_btn.setMinimumWidth(max(btn_width, open_file_btn.sizeHint().width() + 8))
                 open_file_btn.setToolTip("Открыть session_stats.txt")
                 open_file_btn.clicked.connect(self._open_session_stats_file)
                 open_file_btn.setEnabled(self.stats_service.session_stats_exist())
                 file_column.addWidget(open_file_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
                 reset_btn = QPushButton("🔄 Сбросить")
-                reset_btn.setFixedWidth(btn_width)
+                reset_btn.setMinimumWidth(max(btn_width, reset_btn.sizeHint().width() + 8))
                 reset_btn.setToolTip("Сбросить счётчики текущего сеанса")
                 reset_btn.clicked.connect(lambda: self._reset_session_stats(dialog))
                 file_column.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignCenter)
@@ -1055,9 +1078,9 @@ class UserManagement(QWidget):
     def _open_session_stats_file(self):
         """Открывает файл session_stats.txt в системном редакторе."""
         try:
-            import os
-            import subprocess
-            
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+
             file_path = self.stats_service.get_session_stats_path()
             
             if not file_path.exists():
@@ -1070,8 +1093,13 @@ class UserManagement(QWidget):
                 )
                 return
             
-            # Открываем в системном редакторе (Windows)
-            os.startfile(str(file_path.resolve()))
+            # Системный редактор по умолчанию: Windows, Linux (xdg-open) и macOS
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path.resolve()))):
+                QMessageBox.warning(
+                    self,
+                    "Не удалось открыть файл",
+                    f"В системе не найдено приложение для .txt.\n\nФайл лежит здесь:\n{file_path}",
+                )
         except Exception as e:
             logger.error(f"Ошибка при открытии файла статистики: {e}")
             QMessageBox.warning(self, "Ошибка", f"Не удалось открыть файл: {e}")
@@ -1355,6 +1383,8 @@ class UserManagement(QWidget):
             cursor = self.history_text.textCursor()
             cursor.insertText(f"ОШИБКА: {str(e)}\n\n", self.message_formats["error"])
 
+    MAX_LOG_BLOCKS = 3000
+
     def clear_logs(self):
         self.logs_text.clear()
     
@@ -1414,7 +1444,15 @@ class UserManagement(QWidget):
                 if msg is not None:
                     cursor.insertText(msg, msg_fmt)
                 cursor.insertText("\n\n")  # дополнительный отступ между сообщениями
-            
+
+            # Ограничиваем размер журнала: новые записи сверху, старые отрезаем снизу
+            # (setMaximumBlockCount тут не подходит — он удаляет с начала документа)
+            doc = self.logs_text.document()
+            if doc.blockCount() > self.MAX_LOG_BLOCKS:
+                tail = QTextCursor(doc.findBlockByNumber(self.MAX_LOG_BLOCKS))
+                tail.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+                tail.removeSelectedText()
+
             # Логика автопрокрутки: новые логи сверху
             if self.logs_auto_scroll.isChecked() or near_top:
                 scrollbar.setValue(scrollbar.minimum())

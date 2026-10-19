@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from gui.widgets import UnicodeSpinBox, UnicodeDoubleSpinBox
 from config.settings import settings_manager  # Импортируем существующий экземпляр
-from PyQt6.QtGui import QDoubleValidator, QIntValidator, QPalette, QFont
+from PyQt6.QtGui import QDoubleValidator, QIntValidator, QPalette, QFont, QFontDatabase
 from bot.handlers.queue_manager import (
     get_model_usage_stats,
     get_available_placeholders,
@@ -466,7 +466,9 @@ class PromptEditorDialog(QDialog):
         for placeholder, description in placeholders.items():
             item = QListWidgetItem(placeholder)
             item.setToolTip(description)
-            item.setFont(QFont("Courier", 9))
+            mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+            mono.setPointSize(9)
+            item.setFont(mono)
             self.placeholders_list.addItem(item)
 
     def _refresh_templates(self):
@@ -617,7 +619,9 @@ class SettingsPanel(QWidget):
         
         # Создаем таймер для автоматического обновления статистики
         self.stats_timer = QTimer(self)
-        self.stats_timer.timeout.connect(self.load_models_table)
+        self.stats_timer.timeout.connect(
+            lambda: self.isVisible() and self.load_models_table()
+        )
         self.stats_timer.start(5000)  # Обновляем каждые 5 секунд
 
 

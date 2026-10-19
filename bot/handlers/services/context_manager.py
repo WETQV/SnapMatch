@@ -231,20 +231,24 @@ def trim_messages_to_context_limit(messages: List[Dict], model_id: str, settings
             return [system_msg] + body_msgs
         return body_msgs
 
-    sequence = compose_sequence(body)
-    total_tokens = count_message_tokens(sequence, model_id=model_id)
+    # Токены аддитивны: 3 (праймер ответа) + сумма по сообщениям. Считаем каждое
+    # сообщение один раз и вычитаем при удалении, а не пересчитываем всю историю.
+    PRIMING = 3
+    costs = [count_message_tokens([m], model_id=model_id) - PRIMING for m in body]
+    system_cost = (count_message_tokens([system_msg], model_id=model_id) - PRIMING) if system_msg else 0
+    total_tokens = PRIMING + system_cost + sum(costs)
     trimmed_any = False
 
     while body and total_tokens > available_context:
         removed = body.pop(0)
+        total_tokens -= costs.pop(0)
         trimmed_any = True
         logger.debug(
             "Удалено сообщение %s (role=%s) при финальном сокращении контекста",
             removed.get('id'),
             removed.get('role'),
         )
-        sequence = compose_sequence(body)
-        total_tokens = count_message_tokens(sequence, model_id=model_id)
+    sequence = compose_sequence(body)
 
     if trimmed_any:
         logger.warning(
