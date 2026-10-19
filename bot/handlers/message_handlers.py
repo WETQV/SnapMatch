@@ -510,8 +510,24 @@ async def message_handler(message: types.Message):
                     await send_ephemeral_reply(message, "Поддержка голосовых сообщений и кружочков отключена в настройках.")
                 return
 
+            media_obj = message.voice if message.content_type == "voice" else message.video_note
+            stt_log = dict(
+                chat_id=chat_id,
+                chat_type=chat_type,
+                telegram_message_id=getattr(message, "message_id", None),
+                author_telegram_id=telegram_id,
+                author_username=username,
+                media_type=message.content_type,
+                engine=settings.get("stt_engine"),
+                duration_sec=getattr(media_obj, "duration", None),
+            )
             try:
                 transcribed_text = await _transcribe_voice_message(message)
+                db.voice.add_transcription(
+                    **stt_log,
+                    status="ok" if transcribed_text else "empty",
+                    text=transcribed_text or "",
+                )
                 if transcribed_text:
                     raw_text = transcribed_text
                     transcribed_text = f"[length={len(raw_text)}]"
@@ -526,6 +542,7 @@ async def message_handler(message: types.Message):
                     return
             except Exception as exc:
                 logger.error(f"Ошибка распознавания речи: {exc}")
+                db.voice.add_transcription(**stt_log, status="error", error=str(exc))
                 if addressing.should_process:
                     await send_ephemeral_reply(
                         message,

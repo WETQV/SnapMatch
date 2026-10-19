@@ -1,11 +1,13 @@
 # gui/admin_panel/admin_panel_base.py
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QWidget, QVBoxLayout, QTabWidget, QLabel
+    QApplication, QMainWindow, QMessageBox, QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton
 )
+from PyQt6.QtCore import QTimer
 from gui.admin_panel.user_management import UserManagement
 from gui.admin_panel.settings_panel import SettingsPanel  # Импортируем ваш реальный SettingsPanel
 from gui.admin_panel.voice_settings_tab import VoiceSettingsTab
+from gui.admin_panel.voice_history_tab import VoiceHistoryTab
 from gui.admin_panel.extra_settings_tab import ExtraSettingsTab
 from gui.admin_panel.mcp_tab import McpTab
 from gui.admin_panel.secretary_tab import SecretaryTab
@@ -53,6 +55,10 @@ class AdminPanelBase(QMainWindow):
         self.voice_tab = VoiceSettingsTab(self)
         self.tab_widget.addTab(self.voice_tab, "Голос")
 
+        # История расшифровок голосовых и кружочков
+        self.voice_history_tab = VoiceHistoryTab(self)
+        self.tab_widget.addTab(self.voice_history_tab, "Расшифровки")
+
         # Дополнительные настройки
         self.extra_tab = ExtraSettingsTab(self)
         self.tab_widget.addTab(self.extra_tab, "Доп настройки")
@@ -68,6 +74,19 @@ class AdminPanelBase(QMainWindow):
         
         # Применяем тему (OLED или обычную)
         self.apply_theme()
+        # Шрифты на Linux шире, чем на Windows: после показа подгоняем кнопки под текст
+        QTimer.singleShot(0, self._fit_buttons_to_text)
+
+    def _fit_buttons_to_text(self):
+        """Снимает жёсткие ограничения ширины, из-за которых текст кнопок обрезался."""
+        for button in self.findChildren(QPushButton):
+            if not button.text():
+                continue  # стрелки спинбоксов и иконочные кнопки не трогаем
+            needed = button.sizeHint().width() + 8
+            if button.maximumWidth() < needed:
+                button.setMaximumWidth(16777215)
+            if button.minimumWidth() < needed:
+                button.setMinimumWidth(needed)
 
     def apply_theme(self):
         """Применяет тему оформления (OLED или стандартную)"""
