@@ -70,6 +70,7 @@ third_party/ffmpeg/
 # Build outputs
 build/
 dist/
+dist-linux/
 installer_output/
 version_info.txt
 *.spec.bak

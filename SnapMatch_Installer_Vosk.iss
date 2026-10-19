@@ -4,7 +4,7 @@
 ; Использует Inno Setup Compiler
 
 #define MyAppName "SnapMatch"
-#define MyAppVersion "1.0.4.3"
+#define MyAppVersion "1.0.4.4"
 #define MyAppPublisher "WETQV Development"
 #define MyAppDeveloper "WETQV"
 #define MyAppURL "https://github.com/WETQV/SnapMatch"
