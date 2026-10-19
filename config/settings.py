@@ -5,11 +5,14 @@ import os
 import random
 import shutil
 import tempfile
+import time
 from utils.encryption import encryption
 
 SETTINGS_FILE = 'config.json'
-SYSTEM_PROMPT_HISTORY_FILE = 'system_prompt_history.json'
-SYSTEM_PROMPT_TEMPLATES_FILE = 'system_prompt_templates.json'
+# Списки лежат рядом с config.json, а не зависят от текущего каталога процесса
+_SETTINGS_DIR = os.path.dirname(os.path.abspath(SETTINGS_FILE))
+SYSTEM_PROMPT_HISTORY_FILE = os.path.join(_SETTINGS_DIR, 'system_prompt_history.json')
+SYSTEM_PROMPT_TEMPLATES_FILE = os.path.join(_SETTINGS_DIR, 'system_prompt_templates.json')
 
 DEFAULT_SECRETARY_MODE = {
     "enabled": False,
@@ -428,43 +431,66 @@ class SettingsManager:
         self._update_global_vars()
         return True
 
-    def load_system_prompt_templates(self):
+    @staticmethod
+    def _read_json_list(path, label):
+        """Читает JSON-список. Битый файл не затирается пустым списком, а откладывается в *.corrupt-<время>."""
+        if not os.path.exists(path):
+            return []
         try:
-            if not os.path.exists(SYSTEM_PROMPT_TEMPLATES_FILE):
-                return []
-            with open(SYSTEM_PROMPT_TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if isinstance(data, list):
                 return data
+            raise ValueError("ожидался список")
         except Exception as e:
-            print(f"Ошибка при загрузке шаблонов системного промпта: {e}")
+            backup = f"{path}.corrupt-{int(time.time())}"
+            try:
+                os.replace(path, backup)
+                print(f"Ошибка при загрузке {label}: {e}. Файл сохранён как {backup}")
+            except OSError:
+                print(f"Ошибка при загрузке {label}: {e}")
         return []
+
+    @staticmethod
+    def _write_json_list_atomic(path, items, label):
+        """Атомарная запись: временный файл + os.replace, чтобы сбой не оставил обрезанный JSON."""
+        target = os.path.abspath(path)
+        temp_path = None
+        try:
+            fd, temp_path = tempfile.mkstemp(prefix=".snapmatch-list-", suffix=".tmp", dir=os.path.dirname(target))
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(list(items or []), f, indent=4, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, target)
+            temp_path = None
+            return True
+        except Exception as e:
+            print(f"Ошибка при сохранении {label}: {e}")
+            return False
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def load_system_prompt_templates(self):
+        data = self._read_json_list(SYSTEM_PROMPT_TEMPLATES_FILE, "шаблонов системного промпта")
+        self._system_prompt_templates_cache = list(data)
+        return data
 
     def save_system_prompt_templates(self, templates):
-        try:
-            with open(SYSTEM_PROMPT_TEMPLATES_FILE, 'w', encoding='utf-8') as f:
-                json.dump(list(templates or []), f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка при сохранении шаблонов системного промпта: {e}")
+        items = list(templates or [])
+        if self._write_json_list_atomic(SYSTEM_PROMPT_TEMPLATES_FILE, items, "шаблонов системного промпта"):
+            self._system_prompt_templates_cache = items
 
     def load_system_prompt_history(self):
-        try:
-            if not os.path.exists(SYSTEM_PROMPT_HISTORY_FILE):
-                return []
-            with open(SYSTEM_PROMPT_HISTORY_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            print(f"Ошибка при загрузке истории системного промпта: {e}")
-        return []
+        data = self._read_json_list(SYSTEM_PROMPT_HISTORY_FILE, "истории системного промпта")
+        self._system_prompt_history_cache = list(data)
+        return data
 
     def save_system_prompt_history(self, history):
-        try:
-            with open(SYSTEM_PROMPT_HISTORY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(list(history or []), f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка при сохранении истории системного промпта: {e}")
+        items = list(history or [])
+        if self._write_json_list_atomic(SYSTEM_PROMPT_HISTORY_FILE, items, "истории системного промпта"):
+            self._system_prompt_history_cache = items
 
     def _migrate_legacy_prompt_history(self):
         legacy_history = list(self.settings.get('system_prompt_history', []) or [])
@@ -514,8 +540,16 @@ class SettingsManager:
     def get_settings(self):
         # Для обратной совместимости добавляем старые поля
         settings_copy = self.settings.copy()
-        settings_copy["system_prompt_history"] = self.load_system_prompt_history()
-        settings_copy["system_prompt_templates"] = self.load_system_prompt_templates()
+        # Списки держим в памяти (файлы пишет только это приложение); отдаём копии,
+        # чтобы вызывающий код не мог испортить кэш.
+        history = getattr(self, '_system_prompt_history_cache', None)
+        if history is None:
+            history = self.load_system_prompt_history()
+        templates = getattr(self, '_system_prompt_templates_cache', None)
+        if templates is None:
+            templates = self.load_system_prompt_templates()
+        settings_copy["system_prompt_history"] = [dict(x) if isinstance(x, dict) else x for x in history]
+        settings_copy["system_prompt_templates"] = [dict(x) if isinstance(x, dict) else x for x in templates]
         
         # Если есть хотя бы одна модель, используем первую для обратной совместимости
         if "models" in settings_copy and settings_copy["models"]:

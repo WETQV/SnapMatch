@@ -108,11 +108,15 @@ def prepare_system_prompt(
             pass
 
         # Заменяем плейсхолдеры
-        processed_prompt = prompt
-        for placeholder, value in placeholders.items():
-            if placeholder in processed_prompt:
-                processed_prompt = processed_prompt.replace(placeholder, value)
-                logger.debug(f"Заменен плейсхолдер {placeholder} на {value}")
+        # Один проход: значения (имя, название чата) с «{{...}}» не подставляются повторно,
+        # а «{{ name }}» с пробелами заменяется так же, как «{{name}}».
+        def _substitute(match):
+            key = "{{" + match.group(1) + "}}"
+            if key in placeholders:
+                return str(placeholders[key])
+            return match.group(0)
+
+        processed_prompt = re.sub(r'\{\{\s*(\w+)\s*\}\}', _substitute, prompt)
         
         # Логируем результат
         logger.debug(f"Обработанный системный промпт для модели {model_id}: {processed_prompt[:100]}...")
