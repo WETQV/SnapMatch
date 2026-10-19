@@ -24,8 +24,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('certifi')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-tmp_ret = collect_all('openai')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# Пакет openai в коде не используется: запросы идут через aiohttp (AiohttpOpenAIClient)
 
 tmp_ret = collect_all('anyio')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -44,15 +43,11 @@ hiddenimports += collect_submodules(
 )
 datas += copy_metadata('mcp')
 
+# Серверная часть MCP (starlette/uvicorn/sse_starlette/jwt/multipart) не собирается целиком:
+# SnapMatch использует только клиент. Нужные модули всё равно попадут через статический анализ импортов.
 for package_name in (
     'httpx_sse',
     'jsonschema',
-    'starlette',
-    'sse_starlette',
-    'uvicorn',
-    'jwt',
-    'multipart',
-    'python_multipart',
 ):
     try:
         tmp_ret = collect_all(package_name)
@@ -153,7 +148,8 @@ project_root = SPECPATH
 repo_root = os.path.abspath(os.path.join(project_root, ".."))
 
 # Иконки qtawesome (шрифты Material Design Icons) и шрифты дизайн-системы
-datas += collect_data_files('qtawesome')
+# Из qtawesome нужен только набор Material Design Icons 6 (префикс 'mdi6.' во всём GUI)
+datas += collect_data_files('qtawesome', includes=['fonts/materialdesignicons6-*'])
 hiddenimports += ['qtawesome']
 
 extra_datas = [
@@ -170,6 +166,7 @@ excluded_modules = [
     'pytz', 'cv2', 'sklearn', 'torch', 'tensorflow',
     'PyQt6.QtOpenGL', 'PyQt6.QtOpenGLWidgets', 'PyQt6.QtWebEngineWidgets',
     'PyQt6.QtNetwork',
+    'openai', 'setuptools', 'pkg_resources', 'distutils', 'pydoc', 'xmlrpc', 'tkinter',
 ]
 if not bundle_vosk:
     # A globally installed Vosk must not leak into the lightweight build as
@@ -235,6 +232,11 @@ a = Analysis(
     # from bytecode and breaks MCP imports in the frozen app with YaccError.
     optimize=0,
 )
+# Qt: переводы и неиспользуемые форматы изображений / PDF-модуль не нужны (используются png, jpeg, svg, ico, gif, webp)
+_QT_DROP = ('qt6pdf', 'qpdf', 'qtiff', 'qwbmp', 'qtga', 'qicns')
+a.datas = [d for d in a.datas if '/translations/' not in d[0].replace('\\', '/') or 'qt6' not in d[0].lower()]
+a.binaries = [b for b in a.binaries if not any(x in os.path.basename(b[0]).lower() for x in _QT_DROP)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
