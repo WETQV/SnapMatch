@@ -92,3 +92,39 @@ class VoiceDB(BaseDB):
         except Exception as e:
             logger.error(f"Не удалось очистить историю расшифровок: {e}")
             return False
+
+    def get_voice_stats(self) -> Dict[str, Any]:
+        """Агрегаты по расшифровкам (SQL COUNT/SUM/GROUP BY, без загрузки строк)."""
+        result: Dict[str, Any] = {
+            "total": 0, "ok": 0, "empty": 0, "error": 0,
+            "voice": 0, "video_note": 0, "duration_sec": 0.0,
+            "engines": {}, "since": None,
+        }
+        try:
+            self.cursor.execute(
+                """
+                SELECT COUNT(*),
+                       COALESCE(SUM(status = 'ok'), 0),
+                       COALESCE(SUM(status = 'empty'), 0),
+                       COALESCE(SUM(status = 'error'), 0),
+                       COALESCE(SUM(status = 'ok' AND media_type = 'voice'), 0),
+                       COALESCE(SUM(status = 'ok' AND media_type = 'video_note'), 0),
+                       COALESCE(SUM(CASE WHEN status = 'ok' THEN duration_sec END), 0),
+                       MIN(created_at)
+                FROM voice_transcriptions
+                """
+            )
+            r = self.cursor.fetchone()
+            (result["total"], result["ok"], result["empty"], result["error"],
+             result["voice"], result["video_note"], result["duration_sec"], result["since"]) = r
+            self.cursor.execute(
+                """
+                SELECT COALESCE(NULLIF(engine, ''), '—'), COUNT(*)
+                FROM voice_transcriptions WHERE status = 'ok'
+                GROUP BY 1 ORDER BY 2 DESC
+                """
+            )
+            result["engines"] = {k: v for k, v in self.cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Не удалось получить статистику расшифровок: {e}")
+        return result

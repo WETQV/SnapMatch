@@ -3,7 +3,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QDialog, QTableWidgetItem,
     QTextEdit, QHeaderView, QAbstractItemView, QSpinBox, QSplitter,
-    QStackedWidget, QApplication, QSizePolicy,
+    QStackedWidget, QApplication, QSizePolicy, QScrollArea, QFrame,
 )
 from PyQt6.QtCore import QTimer, Qt, QEvent
 from PyQt6.QtGui import QFont, QTextCharFormat, QColor, QTextCursor, QTextOption, QFontDatabase
@@ -848,6 +848,59 @@ class UserManagement(QWidget):
         lay.addStretch()
         return section
 
+    @staticmethod
+    def _fmt_hms(seconds) -> str:
+        total = int(round(seconds or 0))
+        return f"{total // 3600}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+    def _build_voice_stats_card(self, v: dict) -> QWidget:
+        """Карточка «Звук»: распознанные голосовые/кружки, пустые, ошибки, длительность, движки."""
+        if not v or not v.get("total"):
+            return self._create_stats_section("Звук", [label("Нет данных", "muted")])
+        fmt = lambda n: self._format_stat_value(n, compact=False)
+        rows = [
+            self._create_stat_row("Голосовых", fmt(v["voice"])),
+            self._create_stat_row("Кружков", fmt(v["video_note"])),
+            self._create_stat_row("Пустых / ошибок", f'{fmt(v["empty"])} / {fmt(v["error"])}'),
+            self._create_stat_row("Длительность", self._fmt_hms(v["duration_sec"])),
+        ]
+        engines = v.get("engines") or {}
+        if engines:
+            rows.append(self._create_stat_row("Движки", ", ".join(f"{k} {n}" for k, n in engines.items())))
+        since = str(v.get("since") or "")[:10]
+        note = label(f"За последние {v['total']} записей" + (f" (с {since})" if since else ""), "muted")
+        rows.append(note)
+        return self._create_stats_section("Звук", rows)
+
+    def _build_usage_stats_card(self, u: dict) -> QWidget:
+        """Карточка «Чем пользовались»: топ MCP, события секретаря, режимы сообщений."""
+        u = u or {}
+        rows = []
+        mcp = u.get("mcp_top") or []
+        sec = u.get("secretary_events") or {}
+        modes = u.get("message_modes") or {}
+        if not (mcp or sec or modes):
+            return self._create_stats_section("Чем пользовались", [label("Нет данных", "muted")])
+        fmt = lambda n: self._format_stat_value(n, compact=False)
+        if mcp:
+            table = make_table(["MCP-инструмент", "Вызовов", "Ошибок"], [
+                [f"{m['server']}/{m['tool']}", fmt(m["calls"]), f"{round(100 * m['errors'] / m['calls'])}%"]
+                for m in mcp
+            ])
+            table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            table.verticalHeader().setDefaultSectionSize(26)
+            table.horizontalHeader().setFixedHeight(30)
+            table.setFixedHeight(30 + 26 * len(mcp) + 4)
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            rows.append(table)
+        else:
+            rows.append(self._create_stat_row("MCP-вызовы", "Нет данных"))
+        rows.append(self._create_stat_row(
+            "Секретарь", ", ".join(f"{k} {n}" for k, n in sec.items()) if sec else "Нет данных"))
+        rows.append(self._create_stat_row(
+            "Сообщения", ", ".join(f"{k} {n}" for k, n in modes.items()) if modes else "Нет данных"))
+        return self._create_stats_section("Чем пользовались", rows)
+
     def show_full_stats(self):
         """Показывает окно со статистикой сеанса и историей прошлых сеансов."""
         try:
@@ -857,9 +910,18 @@ class UserManagement(QWidget):
 
             dialog = FxDialog(self, "Статистика")
             dialog.setMinimumSize(760 + 40, 480 + 40)
-            dialog.resize_content(880, 540)
+            dialog.resize_content(880, 640)
 
-            main_layout = dialog.body
+            # Контент в прокручиваемой области: блоков стало больше, окно не должно выходить за экран
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
+            inner = QWidget()
+            scroll.setWidget(inner)
+            dialog.body.addWidget(scroll, 1)
+            main_layout = QVBoxLayout(inner)
+            main_layout.setContentsMargins(0, 0, 6, 0)
             main_layout.setSpacing(14)
             main_layout.addLayout(page_header("Статистика", "Счётчики текущего сеанса и история прошлых запусков"))
 
@@ -883,6 +945,13 @@ class UserManagement(QWidget):
                 self._create_stat_row("Всего", self._format_stat_value(data['total_tokens'], compact=False)),
             ]), 1)
             main_layout.addLayout(sections)
+
+            # Звук и «чем пользовались» — данные из БД, грузим при открытии окна
+            extra = QHBoxLayout()
+            extra.setSpacing(14)
+            extra.addWidget(self._build_voice_stats_card(self.stats_service.get_voice_stats()), 1)
+            extra.addWidget(self._build_usage_stats_card(self.stats_service.get_usage_stats()), 1)
+            main_layout.addLayout(extra)
 
             # История сеансов
             history_card, history_layout = card()
@@ -939,6 +1008,7 @@ class UserManagement(QWidget):
                 reset_btn.clicked.connect(lambda: self._reset_session_stats(dialog))
                 history_layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignRight)
 
+            history_card.setMinimumHeight(230)
             main_layout.addWidget(history_card, 1)
             dialog.exec()
 
