@@ -180,3 +180,114 @@ def migrate_stt_settings(settings: Dict[str, Any], today: Optional[datetime.date
         settings["stt_openai_model"] = new
         return True
     return False
+
+
+# ───────────────────────── чат-модели OpenAI ─────────────────────────
+DEFAULT_CHAT_MODEL = "gpt-5.6-terra"
+# Отключаемые чат-модели: префикс -> дата отключения (https://developers.openai.com/api/docs/deprecations)
+LEGACY_CHAT_PREFIXES = {"gpt-3.5-turbo": datetime.date(2026, 10, 23)}
+
+
+def _chat_cache_key(base_url: str) -> str:
+    return base_url.rstrip("/") + "#chat"
+
+
+def split_instance_suffix(model_id: str):
+    """'gemma:1' -> ('gemma', ':1'): суффикс :N различает несколько экземпляров одной модели."""
+    head, sep, tail = str(model_id).rpartition(":")
+    if sep and tail.isdigit() and head:
+        return head, sep + tail
+    return str(model_id), ""
+
+
+def is_legacy_chat_model(model_id: str, today: Optional[datetime.date] = None) -> bool:
+    """True, если чат-модель из списка отключаемых и дата отключения уже наступила."""
+    base = split_instance_suffix(model_id)[0]
+    today = today or datetime.date.today()
+    return any(base.startswith(prefix) and today >= date for prefix, date in LEGACY_CHAT_PREFIXES.items())
+
+
+def is_official_openai_model(model: Dict[str, Any]) -> bool:
+    """Только api.openai.com с api_type openai; Groq, custom, OpenRouter, локальные не трогаем."""
+    from urllib.parse import urlparse
+    if str(model.get("api_type", "openai")) != "openai":
+        return False
+    try:
+        return (urlparse(str(model.get("base_url", ""))).hostname or "").lower() == "api.openai.com"
+    except Exception:
+        return False
+
+
+async def get_chat_model_ids_async(base_url: str, api_key: str) -> Optional[set]:
+    """id всех моделей из /models: свежий кэш -> сеть -> устаревший кэш. None, если список неизвестен."""
+    key = _chat_cache_key(base_url)
+    cached = _read_cache(key)
+    if cached is not None:
+        return {m for m in cached if isinstance(m, str)}
+    if api_key:
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{base_url.rstrip('/')}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                ) as response:
+                    if response.status != 200:
+                        raise RuntimeError(f"HTTP {response.status}")
+                    payload = await response.json()
+            ids = sorted({str(i.get("id")) for i in payload.get("data", []) if isinstance(i, dict) and i.get("id")})
+            if ids:
+                _write_cache(key, ids)
+                return set(ids)
+        except Exception as exc:
+            logger.warning("Не удалось получить список моделей OpenAI: %s", type(exc).__name__)
+    stale = _read_cache(key, allow_stale=True)
+    return {m for m in stale if isinstance(m, str)} if stale else None
+
+
+async def refresh_chat_models(settings_manager, today: Optional[datetime.date] = None) -> List[str]:
+    """Подставляет DEFAULT_CHAT_MODEL вместо чат-моделей api.openai.com, которых больше нет.
+
+    Модель заменяется, если она в списке отключённых (дата наступила) или отсутствует в актуальном /models.
+    Без сети и ключа список неизвестен: заменяются только заведомо отключённые. Возвращает строки журнала.
+    """
+    changes: List[str] = []
+    try:
+        models = settings_manager.settings.get("models", [])
+        existing = {m.get("id") for m in models if isinstance(m, dict)}
+        ids_by_url: Dict[str, Optional[set]] = {}
+        for model in models:
+            if not isinstance(model, dict) or not is_official_openai_model(model):
+                continue
+            old = str(model.get("id") or "")
+            if not old:
+                continue
+            base_id, suffix = split_instance_suffix(old)
+            reason = ""
+            if is_legacy_chat_model(old, today):
+                reason = "отключена"
+            else:
+                url = str(model.get("base_url"))
+                if url not in ids_by_url:
+                    ids_by_url[url] = await get_chat_model_ids_async(url, str(model.get("api_key") or ""))
+                ids = ids_by_url[url]
+                if ids is not None and base_id not in ids and old not in ids:
+                    reason = "нет в списке /models"
+            if not reason:
+                continue
+            new = DEFAULT_CHAT_MODEL + suffix
+            if new in existing:
+                logger.warning("Модель %s недоступна (%s), но %s уже есть в настройках: замена пропущена", old, reason, new)
+                continue
+            model["id"] = new
+            existing.discard(old)
+            existing.add(new)
+            line = f"Модель {old} недоступна ({reason}), заменена на {new}"
+            logger.warning(line)
+            changes.append(line)
+        if changes:
+            settings_manager.save_settings()
+    except Exception as exc:
+        logger.warning("Проверка чат-моделей OpenAI не выполнена: %s", type(exc).__name__)
+    return changes

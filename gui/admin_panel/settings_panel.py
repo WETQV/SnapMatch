@@ -136,7 +136,7 @@ class ModelDialog(FxDialog):
             "Уникальный идентификатор модели. Используется при запросах к API.\n\n"
             "LM Studio: название модели из списка загруженных\n"
             "Ollama: название модели (например: llama3.2)\n"
-            "OpenAI: gpt-4o, gpt-4o-mini, gpt-3.5-turbo и т.д.\n"
+            "OpenAI: gpt-5.6-terra, gpt-4o-mini и т.д.\n"
             "OpenRouter: google/gemini-2.0-flash-exp:free и т.д.\n"
             "Chutes: ID модели/cord в формате провайдера.\n\n"
             "Если несколько экземпляров одной модели — добавьте суффикс (например: gemma-7b-it:1)"

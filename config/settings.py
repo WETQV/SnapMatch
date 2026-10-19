@@ -136,7 +136,7 @@ class SettingsManager:
                 "stt_max_upload_mb": 25,
                 "models": [
                     {
-                        "id": "gpt-3.5-turbo",
+                        "id": "gpt-5.6-terra",
                         "api_key": "",
                         "base_url": "https://api.openai.com/v1",
                         "weight": 1,
