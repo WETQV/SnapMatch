@@ -2,11 +2,14 @@
 """
 Пользовательский обработчик логов для отображения в GUI.
 Перехватывает логи и передаёт их в очередь для асинхронного отображения в QTextEdit.
+Цвета форматов берутся из токенов дизайн-системы, поэтому читаются во всех темах.
 """
 
 import logging
 import queue
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont
+
+from gui.design import current_tokens
 
 
 class LogHandler(logging.Handler):
@@ -31,25 +34,25 @@ class LogHandler(logging.Handler):
         self.init_formats()
         
     def init_formats(self):
-        """Инициализирует форматы для разных уровней логирования."""
-        # DEBUG - серый
-        self.log_formats[logging.DEBUG].setForeground(QColor("#757575"))
-        
-        # INFO - зеленый
-        self.log_formats[logging.INFO].setForeground(QColor("#2E7D32"))
-        
-        # WARNING - оранжевый
-        self.log_formats[logging.WARNING].setForeground(QColor("#FF8F00"))
-        self.log_formats[logging.WARNING].setFontWeight(QFont.Weight.Bold)
-        
-        # ERROR - красный
-        self.log_formats[logging.ERROR].setForeground(QColor("#D32F2F"))
-        self.log_formats[logging.ERROR].setFontWeight(QFont.Weight.Bold)
-        
-        # CRITICAL - яркий красный с подчеркиванием
-        self.log_formats[logging.CRITICAL].setForeground(QColor("#D50000"))
-        self.log_formats[logging.CRITICAL].setFontWeight(QFont.Weight.Bold)
-        self.log_formats[logging.CRITICAL].setFontUnderline(True)
+        """Пересоздаёт форматы уровней из текущих токенов темы (можно вызывать при смене темы)."""
+        t = current_tokens()
+        if not t:
+            return
+
+        def fmt(role: str, bold: bool = False) -> QTextCharFormat:
+            f = QTextCharFormat()
+            f.setForeground(QColor(t[role]))
+            if bold:
+                f.setFontWeight(QFont.Weight.Bold)
+            return f
+
+        self.log_formats[logging.DEBUG] = fmt("text_muted")
+        self.log_formats[logging.INFO] = fmt("accent")
+        self.log_formats[logging.WARNING] = fmt("warning", bold=True)
+        self.log_formats[logging.ERROR] = fmt("danger", bold=True)
+        critical = fmt("danger", bold=True)
+        critical.setFontUnderline(True)
+        self.log_formats[logging.CRITICAL] = critical
     
     def emit(self, record: logging.LogRecord):
         """
@@ -79,4 +82,3 @@ class LogHandler(logging.Handler):
         while not self.log_queue.empty():
             logs.append(self.log_queue.get())
         return logs
-
