@@ -1,22 +1,18 @@
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QComboBox,
-    QFormLayout,
+    QFrame,
     QGridLayout,
-    QGroupBox,
-    QHeaderView,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
+    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -29,10 +25,48 @@ from bot.handlers.services.prompt_manager import (
     validate_system_prompt,
 )
 from gui.admin_panel.settings_panel import PromptEditorDialog
+from gui.design import (
+    Collapsible,
+    FxButton,
+    FxComboBox,
+    Reveal,
+    SwitchRow,
+    card,
+    icon_button,
+    label,
+    make_table,
+    page_header,
+    primary,
+)
 from utils.database.database_manager import DatabaseManager
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+# Ширина страницы, начиная с которой таблица владельцев стоит слева; уже — сверху на всю ширину
+SIDE_LAYOUT_MIN_WIDTH = 980
+OWNERS_SIDE_WIDTH = 340
+
+
+def _tip(widget, title: str, text: str = "") -> None:
+    """Подсказка: первая строка — заголовок, остальное — пояснение."""
+    widget.setToolTip(f"{title}\n{text}" if text else title)
+
+
+def _mono_line(placeholder: str) -> QLineEdit:
+    line = QLineEdit()
+    line.setObjectName("mono")
+    line.setPlaceholderText(placeholder)
+    return line
+
+
+def _text_area(placeholder: str, min_h: int, max_h: int, read_only: bool = False) -> QPlainTextEdit:
+    edit = QPlainTextEdit()
+    edit.setPlaceholderText(placeholder)
+    edit.setMinimumHeight(min_h)
+    edit.setMaximumHeight(max_h)
+    edit.setReadOnly(read_only)
+    return edit
 
 
 class SecretaryTab(QWidget):
@@ -47,8 +81,12 @@ class SecretaryTab(QWidget):
         self.secretary_prompt_templates = []
         self.placeholder_defaults = {}
         self._chat_message_counts = {}
+        self._loading = False       # идёт заполнение полей из БД: правки не считаются изменениями пользователя
+        self._dirty = False
+        self._side_layout = None
         self._init_ui()
         self._init_tooltips()
+        self._connect_dirty_tracking()
         self.load_profiles()
 
     @staticmethod
@@ -58,221 +96,233 @@ class SecretaryTab(QWidget):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         return item
 
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        toolbar = QHBoxLayout()
-        self.add_button = QPushButton("Добавить владельца")
-        self.delete_button = QPushButton("Удалить владельца")
-        self.save_button = QPushButton("Сохранить")
-        toolbar.addWidget(self.add_button)
-        toolbar.addWidget(self.delete_button)
-        toolbar.addWidget(self.save_button)
-        toolbar.addStretch()
-        layout.addLayout(toolbar)
+    @staticmethod
+    def _caption_field(grid: QGridLayout, row: int, col: int, caption: str, widget: QWidget, span: int = 1) -> None:
+        """Поле сетки: подпись над полем."""
+        grid.addWidget(label(caption, "sectionLabel"), row * 2, col, 1, span)
+        grid.addWidget(widget, row * 2 + 1, col, 1, span)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Telegram ID", "Имя", "Включен", "Режим"])
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+    @staticmethod
+    def _two_columns() -> QGridLayout:
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnMinimumWidth(0, 120)
+        grid.setColumnMinimumWidth(1, 120)
+        return grid
+
+    def _init_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 0)
+        root.setSpacing(0)
+
+        # ── Шапка ──
+        self.add_button = icon_button("Добавить владельца", "mdi6.account-plus-outline")
+        self.delete_button = icon_button("Удалить владельца", "mdi6.account-remove-outline", "danger")
+        root.addLayout(page_header("Секретарь", "Автоответы от имени владельца", self.add_button, self.delete_button))
+        root.addSpacing(16)
+
+        # ── Таблица владельцев ──
+        self.owners_card, owners_lay = card()
+        owners_lay.addWidget(label("ВЛАДЕЛЬЦЫ", "sectionLabel"))
+        self.table = make_table(["Telegram ID", "Имя", "Вкл", "Режим"])
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.table.setMinimumHeight(150)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        left_layout.addWidget(self.table)
-        splitter.addWidget(left_widget)
+        header.setStretchLastSection(False)
+        self.table.verticalHeader().setDefaultSectionSize(38)
+        owners_lay.addWidget(self.table, 1)
 
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        right_content = QWidget()
-        right_content.setMinimumWidth(640)
-        right_layout = QVBoxLayout(right_content)
-        right_layout.setContentsMargins(8, 8, 8, 8)
-        right_layout.setSpacing(10)
-        status_group = QGroupBox("Статус владельца")
-        status_form = QFormLayout(status_group)
-        status_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        self.enabled = QCheckBox("Включить секретаря для владельца")
-        self.mode = QComboBox()
+        # ── Правая колонка: секции-карточки ──
+        self.details = QWidget()
+        col = QVBoxLayout(self.details)
+        col.setContentsMargins(0, 0, 0, 12)
+        col.setSpacing(14)
+
+        # Статус владельца
+        status_box, status_lay = card()
+        status_lay.addWidget(label("Статус владельца", "h2"))
+        self.owner_label = label("Владелец не выбран", "mono")
+        self.owner_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        status_lay.addWidget(self.owner_label)
+        self.enabled = SwitchRow("Включить секретаря для владельца", False)
+        status_lay.addWidget(self.enabled)
+        self.mode = FxComboBox()
         self.mode.addItems(self.MODES)
-        status_form.addRow("Секретарь:", self.enabled)
-        status_form.addRow("Режим ответа:", self.mode)
-        right_layout.addWidget(status_group)
+        status_lay.addWidget(label("РЕЖИМ ОТВЕТА", "sectionLabel"))
+        status_lay.addWidget(self.mode)
+        col.addWidget(status_box)
 
-        prompt_group = QGroupBox("Prompt")
-        prompt_layout = QVBoxLayout(prompt_group)
-        prompt_row = QHBoxLayout()
-        self.prompt = QTextEdit()
-        self.prompt.setReadOnly(True)
-        self.prompt.setPlaceholderText("System Prompt секретаря (пусто = без дополнительного prompt)")
-        self.prompt.setMinimumHeight(82)
-        self.prompt.setMaximumHeight(110)
+        # Prompt
+        prompt_box, prompt_lay = card()
+        prompt_lay.addWidget(label("Prompt", "h2"))
+        self.prompt = _text_area("System Prompt секретаря (пусто = без дополнительного prompt)", 82, 130, True)
         self.system_prompt_input = self.prompt
-        prompt_actions = QVBoxLayout()
-        self.edit_prompt_button = QPushButton("Редактировать")
-        self.validate_prompt_button = QPushButton("Проверить промпт")
-        prompt_actions.addStretch(1)
-        prompt_actions.addWidget(self.edit_prompt_button)
-        prompt_actions.addWidget(self.validate_prompt_button)
-        prompt_actions.addStretch(1)
-        prompt_row.addWidget(self.prompt, 1)
-        prompt_row.addLayout(prompt_actions)
-        prompt_layout.addLayout(prompt_row)
-        self.prompt_status_label = QLabel()
+        prompt_lay.addWidget(self.prompt)
+        prompt_actions = QHBoxLayout()
+        prompt_actions.setSpacing(8)
+        self.edit_prompt_button = icon_button("Редактировать", "mdi6.pencil-outline")
+        self.validate_prompt_button = icon_button("Проверить промпт", "mdi6.check-decagram-outline")
+        for button in (self.edit_prompt_button, self.validate_prompt_button):
+            button.setMinimumWidth(0)
+            prompt_actions.addWidget(button)
+        prompt_actions.addStretch()
+        prompt_lay.addLayout(prompt_actions)
+        self.prompt_status_label = label("", "muted")
         self.prompt_status_label.setWordWrap(True)
-        self.prompt_status_label.setStyleSheet("color: #9AA6B2; font-size: 11px;")
-        prompt_layout.addWidget(self.prompt_status_label)
-        right_layout.addWidget(prompt_group)
+        self.prompt_status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        prompt_lay.addWidget(self.prompt_status_label)
+        col.addWidget(prompt_box)
 
-        behavior_group = QGroupBox("Поведение")
-        behavior_form = QFormLayout(behavior_group)
-        behavior_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        self.save_history = QCheckBox("Сохранять secretary-историю")
-        self.ignore_bots = QCheckBox("Игнорировать сообщения от ботов")
-        self.media_stt = QCheckBox("Обрабатывать голосовые и кружки")
-        self.media_images = QCheckBox("Обрабатывать фото и картинки")
-        self.default_delay = QLineEdit()
-        self.default_delay.setPlaceholderText("2.0")
-        self.burst_window = QLineEdit()
-        self.burst_window.setPlaceholderText("2.0")
-        self.max_batch_messages = QLineEdit()
-        self.max_batch_messages.setPlaceholderText("10")
-        self.default_session_ttl = QLineEdit()
-        self.default_session_ttl.setPlaceholderText("3600")
-        self.close_after_reply = QCheckBox("Закрывать сессию после auto-ответа")
-        self.turn_based_replies = QCheckBox("Ждать новое входящее после ответа")
-        self.owner_behavior = QComboBox()
+        # Поведение
+        behavior_box, behavior_lay = card()
+        behavior_lay.addWidget(label("Поведение", "h2"))
+        self.save_history = SwitchRow("Сохранять secretary-историю", True)
+        self.ignore_bots = SwitchRow("Игнорировать сообщения от ботов", True)
+        self.media_stt = SwitchRow("Обрабатывать голосовые и кружки", False)
+        self.media_images = SwitchRow("Обрабатывать фото и картинки", False)
+        self.close_after_reply = SwitchRow("Закрывать сессию после auto-ответа", False)
+        self.turn_based_replies = SwitchRow("Ждать новое входящее после ответа", True)
+        switches = self._two_columns()
+        for index, switch in enumerate((
+            self.save_history, self.ignore_bots, self.media_stt, self.media_images,
+            self.close_after_reply, self.turn_based_replies,
+        )):
+            switches.addWidget(switch, index // 2, index % 2)
+        behavior_lay.addLayout(switches)
+
+        self.default_delay = _mono_line("2.0")
+        self.burst_window = _mono_line("2.0")
+        self.max_batch_messages = _mono_line("10")
+        self.default_session_ttl = _mono_line("3600")
+        self.owner_behavior = FxComboBox()
         self.owner_behavior.addItems(self.OWNER_BEHAVIORS)
-        self.allowed_chats = QTextEdit()
-        self.allowed_chats.setPlaceholderText("Разрешенные chat_id, по одному на строку")
-        self.allowed_chats.setMinimumHeight(52)
-        self.allowed_chats.setMaximumHeight(70)
-        self.blocked_chats = QTextEdit()
-        self.blocked_chats.setPlaceholderText("Запрещенные chat_id, по одному на строку")
-        self.blocked_chats.setMinimumHeight(52)
-        self.blocked_chats.setMaximumHeight(70)
-        behavior_flags = QWidget()
-        behavior_flags_layout = QGridLayout(behavior_flags)
-        behavior_flags_layout.setContentsMargins(0, 0, 0, 0)
-        behavior_flags_layout.setHorizontalSpacing(18)
-        behavior_flags_layout.setVerticalSpacing(6)
-        behavior_flags_layout.addWidget(self.save_history, 0, 0)
-        behavior_flags_layout.addWidget(self.ignore_bots, 0, 1)
-        behavior_flags_layout.addWidget(self.media_stt, 1, 0)
-        behavior_flags_layout.addWidget(self.media_images, 1, 1)
-        behavior_form.addRow("", behavior_flags)
-        behavior_form.addRow("Задержка ответа, сек:", self.default_delay)
-        behavior_form.addRow("Окно объединения, сек:", self.burst_window)
-        behavior_form.addRow("Макс. сообщений в пачке:", self.max_batch_messages)
-        behavior_form.addRow("TTL сессии, сек:", self.default_session_ttl)
-        behavior_form.addRow("", self.close_after_reply)
-        behavior_form.addRow("", self.turn_based_replies)
-        behavior_form.addRow("Поведение владельца:", self.owner_behavior)
-        behavior_form.addRow("Разрешенные чаты:", self.allowed_chats)
-        behavior_form.addRow("Запрещенные чаты:", self.blocked_chats)
-        right_layout.addWidget(behavior_group)
+        self.allowed_chats = _text_area("Разрешенные chat_id, по одному на строку", 56, 90)
+        self.blocked_chats = _text_area("Запрещенные chat_id, по одному на строку", 56, 90)
+        fields = self._two_columns()
+        self._caption_field(fields, 0, 0, "ЗАДЕРЖКА ОТВЕТА, СЕК", self.default_delay)
+        self._caption_field(fields, 0, 1, "ОКНО ОБЪЕДИНЕНИЯ, СЕК", self.burst_window)
+        self._caption_field(fields, 1, 0, "МАКС. СООБЩЕНИЙ В ПАЧКЕ", self.max_batch_messages)
+        self._caption_field(fields, 1, 1, "TTL СЕССИИ, СЕК", self.default_session_ttl)
+        self._caption_field(fields, 2, 0, "ПОВЕДЕНИЕ ВЛАДЕЛЬЦА", self.owner_behavior, 2)
+        self._caption_field(fields, 3, 0, "РАЗРЕШЕННЫЕ ЧАТЫ", self.allowed_chats)
+        self._caption_field(fields, 3, 1, "ЗАПРЕЩЕННЫЕ ЧАТЫ", self.blocked_chats)
+        behavior_lay.addLayout(fields)
+        col.addWidget(behavior_box)
 
-        chat_group = QGroupBox("Настройки отдельных чатов")
-        chat_form = QFormLayout(chat_group)
-        chat_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        chat_toolbar_widget = QWidget()
-        chat_toolbar = QVBoxLayout(chat_toolbar_widget)
-        chat_toolbar.setContentsMargins(0, 0, 0, 0)
-        chat_toolbar.setSpacing(8)
-        chat_buttons_row = QHBoxLayout()
-        chat_buttons_row.setContentsMargins(0, 0, 0, 0)
-        chat_buttons_row.setSpacing(8)
-        chat_id_row = QHBoxLayout()
-        chat_id_row.setContentsMargins(0, 0, 0, 0)
-        chat_id_row.setSpacing(8)
+        # Настройки отдельных чатов — раскрывающаяся секция (нужна редко)
+        overrides = QWidget()
+        over_lay = QVBoxLayout(overrides)
+        over_lay.setContentsMargins(0, 8, 0, 0)
+        over_lay.setSpacing(10)
         self.chat_override_id = QComboBox()
         self.chat_override_id.setEditable(True)
         self.chat_override_id.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         if self.chat_override_id.lineEdit():
             self.chat_override_id.lineEdit().setPlaceholderText("chat_id")
-        self.chat_override_id.setFixedWidth(105)
-        self.load_chat_button = QPushButton("Загрузить чат")
-        self.save_chat_button = QPushButton("Сохранить чат")
-        self.clear_chat_button = QPushButton("Сбросить поля")
-        self.clear_history_button = QPushButton("Очистить историю")
-        chat_buttons_row.addWidget(self.load_chat_button)
-        chat_buttons_row.addWidget(self.save_chat_button)
-        chat_buttons_row.addWidget(self.clear_chat_button)
-        chat_buttons_row.addWidget(self.clear_history_button)
-        chat_buttons_row.addStretch(1)
-        chat_id_row.addWidget(self.chat_override_id)
-        self.chat_history_count_label = QLabel("История: 0 сообщений")
-        self.chat_history_count_label.setStyleSheet("color: #9AA6B2;")
+        self.chat_override_id.setMinimumWidth(120)
+        self.chat_override_id.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.chat_history_count_label = label("История: 0 сообщений", "muted")
+        chat_id_row = QHBoxLayout()
+        chat_id_row.setSpacing(12)
+        chat_id_row.addWidget(self.chat_override_id, 1)
         chat_id_row.addWidget(self.chat_history_count_label)
-        chat_id_row.addStretch(1)
-        chat_toolbar.addLayout(chat_buttons_row)
-        chat_toolbar.addLayout(chat_id_row)
-        chat_form.addRow("Чат:", chat_toolbar_widget)
-        self.chat_response_mode = QComboBox()
+        over_lay.addWidget(label("ЧАТ (ID ИЛИ «ID | НАЗВАНИЕ»)", "sectionLabel"))
+        over_lay.addLayout(chat_id_row)
+
+        self.load_chat_button = icon_button("Загрузить чат", "mdi6.download-outline")
+        self.save_chat_button = icon_button("Сохранить чат", "mdi6.content-save-outline")
+        self.clear_chat_button = icon_button("Сбросить поля", "mdi6.eraser")
+        self.clear_history_button = icon_button("Очистить историю", "mdi6.delete-sweep-outline", "danger")
+        chat_buttons = self._two_columns()
+        for index, button in enumerate((
+            self.load_chat_button, self.save_chat_button, self.clear_chat_button, self.clear_history_button,
+        )):
+            button.setMinimumWidth(0)
+            chat_buttons.addWidget(button, index // 2, index % 2)
+        over_lay.addLayout(chat_buttons)
+
+        self.chat_response_mode = FxComboBox()
         self.chat_response_mode.addItems(["inherit", *self.MODES])
-        self.chat_prompt = QTextEdit()
-        self.chat_prompt.setPlaceholderText("Пусто = наследовать prompt владельца")
-        self.chat_prompt.setMinimumHeight(70)
-        self.chat_prompt.setMaximumHeight(80)
-        self.chat_history = QComboBox()
+        self.chat_prompt = _text_area("Пусто = наследовать prompt владельца", 70, 100)
+        self.chat_history = FxComboBox()
         self.chat_history.addItems(["inherit", "on", "off"])
-        self.chat_ttl = QLineEdit()
-        self.chat_ttl.setPlaceholderText("Пусто = наследовать")
-        self.chat_close_after_reply = QComboBox()
+        self.chat_ttl = _mono_line("Пусто = наследовать")
+        self.chat_close_after_reply = FxComboBox()
         self.chat_close_after_reply.addItems(["inherit", "on", "off"])
-        self.chat_turn_based_replies = QComboBox()
+        self.chat_turn_based_replies = FxComboBox()
         self.chat_turn_based_replies.addItems(["inherit", "on", "off"])
-        self.chat_owner_behavior = QComboBox()
+        self.chat_owner_behavior = FxComboBox()
         self.chat_owner_behavior.addItems(["inherit", *self.OWNER_BEHAVIORS])
-        self.chat_allowed_mcp = QTextEdit()
-        self.chat_allowed_mcp.setPlaceholderText("Имена MCP серверов/инструментов, по одному на строку")
-        self.chat_allowed_mcp.setMinimumHeight(54)
-        self.chat_allowed_mcp.setMaximumHeight(60)
-        self.chat_media_stt = QComboBox()
+        self.chat_allowed_mcp = _text_area("Имена MCP серверов/инструментов, по одному на строку", 54, 90)
+        self.chat_media_stt = FxComboBox()
         self.chat_media_stt.addItems(["inherit", "on", "off"])
-        self.chat_media_images = QComboBox()
+        self.chat_media_images = FxComboBox()
         self.chat_media_images.addItems(["inherit", "on", "off"])
-        chat_form.addRow("Режим:", self.chat_response_mode)
-        chat_form.addRow("Prompt чата:", self.chat_prompt)
-        chat_form.addRow("История:", self.chat_history)
-        chat_form.addRow("TTL сессии, сек:", self.chat_ttl)
-        chat_form.addRow("Закрывать после ответа:", self.chat_close_after_reply)
-        chat_form.addRow("Очередность как в ЛС:", self.chat_turn_based_replies)
-        chat_form.addRow("Поведение владельца:", self.chat_owner_behavior)
-        chat_form.addRow("Разрешенные MCP:", self.chat_allowed_mcp)
-        chat_form.addRow("Голос/STT:", self.chat_media_stt)
-        chat_form.addRow("Фото/VLM:", self.chat_media_images)
-        right_layout.addWidget(chat_group)
+        overrides_grid = self._two_columns()
+        self._caption_field(overrides_grid, 0, 0, "РЕЖИМ", self.chat_response_mode)
+        self._caption_field(overrides_grid, 0, 1, "ИСТОРИЯ", self.chat_history)
+        self._caption_field(overrides_grid, 1, 0, "TTL СЕССИИ, СЕК", self.chat_ttl)
+        self._caption_field(overrides_grid, 1, 1, "ЗАКРЫВАТЬ ПОСЛЕ ОТВЕТА", self.chat_close_after_reply)
+        self._caption_field(overrides_grid, 2, 0, "ОЧЕРЕДНОСТЬ КАК В ЛС", self.chat_turn_based_replies)
+        self._caption_field(overrides_grid, 2, 1, "ПОВЕДЕНИЕ ВЛАДЕЛЬЦА", self.chat_owner_behavior)
+        self._caption_field(overrides_grid, 3, 0, "ГОЛОС / STT", self.chat_media_stt)
+        self._caption_field(overrides_grid, 3, 1, "ФОТО / VLM", self.chat_media_images)
+        self._caption_field(overrides_grid, 4, 0, "PROMPT ЧАТА", self.chat_prompt, 2)
+        self._caption_field(overrides_grid, 5, 0, "РАЗРЕШЕННЫЕ MCP", self.chat_allowed_mcp, 2)
+        over_lay.addLayout(overrides_grid)
+        chat_box, chat_lay = card()
+        self.chat_section = Collapsible("Настройки отдельных чатов (по умолчанию наследуются)", overrides)
+        chat_lay.addWidget(self.chat_section)
+        col.addWidget(chat_box)
 
-        events_group = QGroupBox("Журнал")
-        events_layout = QVBoxLayout(events_group)
-        self.events = QTextEdit()
-        self.events.setReadOnly(True)
-        self.events.setPlaceholderText("Последние события выбранного владельца")
-        self.events.setMinimumHeight(140)
-        events_layout.addWidget(self.events)
-        right_layout.addWidget(events_group)
-        right_layout.addStretch(1)
+        # Журнал
+        events_box, events_lay = card()
+        events_lay.addWidget(label("Журнал", "h2"))
+        self.events = _text_area("Последние события выбранного владельца", 120, 100000, True)
+        events_lay.addWidget(self.events)
+        col.addWidget(events_box)
+        col.addStretch(1)
 
-        right_scroll.setWidget(right_content)
-        splitter.addWidget(right_scroll)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        splitter.setSizes([460, 720])
-        layout.addWidget(splitter, 1)
+        # ── Прокрутка только по вертикали: на узком окне горизонтальной полосы нет ──
+        self.scroll_content = QWidget()
+        self.grid = QGridLayout(self.scroll_content)
+        self.grid.setContentsMargins(0, 0, 8, 0)
+        self.grid.setHorizontalSpacing(16)
+        self.grid.setVerticalSpacing(14)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setWidget(self.scroll_content)
+        root.addWidget(self.scroll, 1)
+        self._arrange(side=False)
+
+        # ── Панель несохранённых изменений (Reveal) ──
+        self.savebar = QFrame()
+        self.savebar.setObjectName("savebar")
+        bar = QHBoxLayout(self.savebar)
+        bar.setContentsMargins(18, 10, 18, 10)
+        bar.addWidget(label("Есть несохранённые изменения", "h2"))
+        bar.addStretch()
+        self.discard_button = FxButton("Отменить")
+        self.save_button = primary("Сохранить")
+        bar.addWidget(self.discard_button)
+        bar.addWidget(self.save_button)
+        self.save_reveal = Reveal(self.savebar)
+        root.addWidget(self.save_reveal)
+        root.addSpacing(18)
 
         self.add_button.clicked.connect(self.add_profile)
         self.delete_button.clicked.connect(self.delete_profile)
         self.save_button.clicked.connect(self.save_profile)
+        self.discard_button.clicked.connect(self.discard_changes)
         self.load_chat_button.clicked.connect(self.load_chat_override)
         self.save_chat_button.clicked.connect(self.save_chat_override)
         self.clear_chat_button.clicked.connect(self.clear_chat_override)
@@ -284,73 +334,146 @@ class SecretaryTab(QWidget):
         self.validate_prompt_button.clicked.connect(self.validate_secretary_prompt)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
+    # ── Раскладка: таблица владельцев слева (широкое окно) или сверху (узкое) ──
+
+    def _arrange(self, side: bool) -> None:
+        if self._side_layout is side:
+            return
+        self._side_layout = side
+        for widget in (self.owners_card, self.details):
+            self.grid.removeWidget(widget)
+        for column in range(2):
+            self.grid.setColumnStretch(column, 0)
+            self.grid.setColumnMinimumWidth(column, 0)
+        if side:
+            self.owners_card.setMinimumWidth(OWNERS_SIDE_WIDTH)
+            self.owners_card.setMaximumWidth(OWNERS_SIDE_WIDTH)
+            self.owners_card.setMinimumHeight(0)
+            self.owners_card.setMaximumHeight(16777215)
+            self.grid.addWidget(self.owners_card, 0, 0, Qt.AlignmentFlag.AlignTop)
+            self.grid.addWidget(self.details, 0, 1)
+            self.grid.setColumnStretch(1, 1)
+        else:
+            self.owners_card.setMinimumWidth(0)
+            self.owners_card.setMaximumWidth(16777215)
+            self.owners_card.setMinimumHeight(215)
+            self.owners_card.setMaximumHeight(215)
+            self.grid.addWidget(self.owners_card, 0, 0)
+            self.grid.addWidget(self.details, 1, 0)
+            self.grid.setColumnStretch(0, 1)
+        self.owners_card.show()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._arrange(side=self.width() >= SIDE_LAYOUT_MIN_WIDTH)
+
+    # ── Панель «есть несохранённые изменения» ──
+
+    def _set_dirty(self, dirty: bool) -> None:
+        self._dirty = bool(dirty)
+        self.save_reveal.set_open(self._dirty)
+
+    def _mark_dirty(self, *_args) -> None:
+        if self._loading:
+            return
+        self._set_dirty(True)
+
+    def _connect_dirty_tracking(self) -> None:
+        """Любая правка поля владельца показывает панель «Сохранить / Отменить» (stateChanged у SwitchRow нет — toggled)."""
+        for switch in (
+            self.enabled, self.save_history, self.ignore_bots, self.media_stt, self.media_images,
+            self.close_after_reply, self.turn_based_replies,
+        ):
+            switch.toggled.connect(self._mark_dirty)
+        for combo in (self.mode, self.owner_behavior):
+            combo.currentIndexChanged.connect(self._mark_dirty)
+        for line in (self.default_delay, self.burst_window, self.max_batch_messages, self.default_session_ttl):
+            line.textChanged.connect(self._mark_dirty)
+        for edit in (self.prompt, self.allowed_chats, self.blocked_chats):
+            edit.textChanged.connect(self._mark_dirty)
+
+    def discard_changes(self) -> None:
+        """Возвращает поля владельца к сохранённым значениям; несохранённая форма чата остаётся."""
+        if self.current_owner_id is None:
+            self._set_dirty(False)
+            return
+        chat_state = self._capture_chat_form()
+        self._on_selection_changed()
+        self._restore_chat_form(chat_state)
+
     def _init_tooltips(self):
-        self.add_button.setToolTip("Добавить владельца, который сможет использовать бота как личного секретаря.")
-        self.delete_button.setToolTip("Удалить выбранный secretary-профиль.")
-        self.save_button.setToolTip("Сохранить настройки выбранного владельца.")
-        self.table.setToolTip("Список владельцев secretary-профилей. Выберите строку, чтобы редактировать настройки справа.")
-        self.enabled.setToolTip("Включить или выключить ответы секретаря для выбранного владельца.")
-        self.mode.setToolTip("Режим ответа: off - выключено, draft - черновик, confirm - с подтверждением, auto - автоответ.")
-        self.prompt.setToolTip("System Prompt секретаря. Он задаёт стиль и правила ответа за владельца.")
-        self.edit_prompt_button.setToolTip("Открыть расширенный редактор System Prompt секретаря с плейсхолдерами и шаблонами.")
-        self.validate_prompt_button.setToolTip("Проверить текущий secretary prompt на неизвестные плейсхолдеры и типичные проблемы.")
-        self.prompt_status_label.setToolTip("Статус текущего secretary prompt выбранного владельца.")
-        self.save_history.setToolTip("Сохранять отдельную историю secretary-диалогов для контекста.")
-        self.ignore_bots.setToolTip("Не отвечать на сообщения, отправленные Telegram-ботами.")
-        self.media_stt.setToolTip("Разрешить секретарю распознавать голосовые сообщения и кружочки через общие STT-настройки.")
-        self.media_images.setToolTip("Разрешить секретарю скачивать фото/картинки и передавать их VLM-модели, если такая модель активна.")
-        self.default_delay.setToolTip("Минимальная задержка перед постановкой запроса секретаря в очередь.")
-        self.burst_window.setToolTip("Период тишины, в течение которого быстрые сообщения объединяются в один запрос.")
-        self.max_batch_messages.setToolTip("Максимальное число последних сообщений, которые можно объединить в один запрос.")
-        self.default_session_ttl.setToolTip("Время жизни сессии в секундах. 0 означает бесконечную сессию.")
-        self.close_after_reply.setToolTip("Если включено, auto-ответ закрывает текущую сессию после отправки.")
-        self.turn_based_replies.setToolTip(
+        _tip(self.add_button, "Добавить владельца", "Добавить владельца, который сможет использовать бота как личного секретаря.")
+        _tip(self.delete_button, "Удалить владельца", "Удалить выбранный secretary-профиль (с подтверждением).")
+        _tip(self.save_button, "Сохранить", "Сохранить настройки выбранного владельца.")
+        _tip(self.discard_button, "Отменить", "Вернуть поля владельца к сохранённым значениям.")
+        _tip(self.table, "Владельцы", "Список владельцев secretary-профилей. Выберите строку, чтобы редактировать настройки.")
+        _tip(self.enabled, "Секретарь", "Включить или выключить ответы секретаря для выбранного владельца.")
+        _tip(self.mode, "Режим ответа", "off - выключено, draft - черновик, confirm - с подтверждением, auto - автоответ.")
+        _tip(self.prompt, "System Prompt", "System Prompt секретаря. Он задаёт стиль и правила ответа за владельца.")
+        _tip(self.edit_prompt_button, "Редактировать", "Открыть расширенный редактор System Prompt секретаря с плейсхолдерами и шаблонами.")
+        _tip(self.validate_prompt_button, "Проверить промпт", "Проверить текущий secretary prompt на неизвестные плейсхолдеры и типичные проблемы.")
+        _tip(self.prompt_status_label, "Статус промпта", "Статус текущего secretary prompt выбранного владельца.")
+        _tip(self.save_history, "История", "Сохранять отдельную историю secretary-диалогов для контекста.")
+        _tip(self.ignore_bots, "Сообщения ботов", "Не отвечать на сообщения, отправленные Telegram-ботами.")
+        _tip(self.media_stt, "Голосовые", "Разрешить секретарю распознавать голосовые сообщения и кружочки через общие STT-настройки.")
+        _tip(self.media_images, "Фото", "Разрешить секретарю скачивать фото/картинки и передавать их VLM-модели, если такая модель активна.")
+        _tip(self.default_delay, "Задержка ответа", "Минимальная задержка перед постановкой запроса секретаря в очередь.")
+        _tip(self.burst_window, "Окно объединения", "Период тишины, в течение которого быстрые сообщения объединяются в один запрос.")
+        _tip(self.max_batch_messages, "Сообщений в пачке", "Максимальное число последних сообщений, которые можно объединить в один запрос.")
+        _tip(self.default_session_ttl, "TTL сессии", "Время жизни сессии в секундах. 0 означает бесконечную сессию.")
+        _tip(self.close_after_reply, "Закрывать сессию", "Если включено, auto-ответ закрывает текущую сессию после отправки.")
+        _tip(
+            self.turn_based_replies, "Очередность ответов",
             "Если включено, секретарь игнорирует исходящие business-сообщения владельца/бота "
-            "и ждёт новое входящее сообщение собеседника перед следующим ответом."
+            "и ждёт новое входящее сообщение собеседника перед следующим ответом.",
         )
-        self.owner_behavior.setToolTip("Что делать, если владелец пишет в secretary-чате: ignore, takeover, add_to_context или close_session.")
-        self.allowed_chats.setToolTip("Если заполнено, секретарь отвечает только в этих chat_id. Один ID на строку.")
-        self.blocked_chats.setToolTip("Секретарь не отвечает в этих chat_id. Один ID на строку.")
-        self.chat_override_id.setToolTip("chat_id, для которого нужно загрузить или сохранить override.")
-        self.chat_history_count_label.setToolTip("Количество сохранённых secretary-сообщений для выбранного chat_id.")
-        self.load_chat_button.setToolTip("Загрузить per-chat override выбранного владельца.")
-        self.save_chat_button.setToolTip("Сохранить override для указанного chat_id.")
-        self.clear_chat_button.setToolTip("Сбросить поля редактора. Существующую запись в базе не удаляет.")
-        self.clear_history_button.setToolTip("Удалить secretary-историю выбранного chat_id и закрыть активную сессию этого чата.")
-        self.chat_response_mode.setToolTip(
+        _tip(self.owner_behavior, "Поведение владельца", "Что делать, если владелец пишет в secretary-чате: ignore, takeover, add_to_context или close_session.")
+        _tip(self.allowed_chats, "Разрешённые чаты", "Если заполнено, секретарь отвечает только в этих chat_id. Один ID на строку.")
+        _tip(self.blocked_chats, "Запрещённые чаты", "Секретарь не отвечает в этих chat_id. Один ID на строку.")
+        _tip(self.chat_override_id, "chat_id", "chat_id, для которого нужно загрузить или сохранить override.")
+        _tip(self.chat_history_count_label, "История чата", "Количество сохранённых secretary-сообщений для выбранного chat_id.")
+        _tip(self.load_chat_button, "Загрузить чат", "Загрузить per-chat override выбранного владельца.")
+        _tip(self.save_chat_button, "Сохранить чат", "Сохранить override для указанного chat_id.")
+        _tip(self.clear_chat_button, "Сбросить поля", "Сбросить поля редактора. Существующую запись в базе не удаляет.")
+        _tip(self.clear_history_button, "Очистить историю", "Удалить secretary-историю выбранного chat_id и закрыть активную сессию этого чата.")
+        _tip(
+            self.chat_response_mode, "Режим чата",
             "Режим ответа для конкретного чата:\n"
             "inherit - использовать режим владельца;\n"
             "off - не отвечать;\n"
             "draft - только сохранять черновик;\n"
             "confirm - спрашивать подтверждение;\n"
-            "auto - отправлять автоматически."
+            "auto - отправлять автоматически.",
         )
-        self.chat_prompt.setToolTip("System Prompt только для указанного chat_id. Пустое поле означает наследование prompt владельца.")
-        self.chat_history.setToolTip("inherit - наследовать настройку истории владельца, on - сохранять историю, off - не сохранять.")
-        self.chat_ttl.setToolTip("TTL сессии для этого chat_id в секундах. Пустое поле означает наследование значения владельца.")
-        self.chat_close_after_reply.setToolTip("inherit - наследовать, on - закрывать сессию после auto-ответа, off - не закрывать.")
-        self.chat_turn_based_replies.setToolTip(
+        _tip(self.chat_prompt, "Prompt чата", "System Prompt только для указанного chat_id. Пустое поле означает наследование prompt владельца.")
+        _tip(self.chat_history, "История чата", "inherit - наследовать настройку истории владельца, on - сохранять историю, off - не сохранять.")
+        _tip(self.chat_ttl, "TTL чата", "TTL сессии для этого chat_id в секундах. Пустое поле означает наследование значения владельца.")
+        _tip(self.chat_close_after_reply, "Закрывать после ответа", "inherit - наследовать, on - закрывать сессию после auto-ответа, off - не закрывать.")
+        _tip(
+            self.chat_turn_based_replies, "Очередность как в ЛС",
             "inherit - наследовать, on - отвечать только после нового входящего собеседника, "
-            "off - разрешить старое поведение."
+            "off - разрешить старое поведение.",
         )
-        self.chat_owner_behavior.setToolTip(
+        _tip(
+            self.chat_owner_behavior, "Поведение владельца в чате",
             "Поведение при сообщении владельца в этом чате:\n"
             "inherit - наследовать;\n"
             "ignore - игнорировать;\n"
             "takeover - считать, что владелец перехватил диалог;\n"
             "add_to_context - добавить к контексту;\n"
-            "close_session - закрыть текущую сессию."
+            "close_session - закрыть текущую сессию.",
         )
-        self.chat_allowed_mcp.setToolTip(
+        _tip(
+            self.chat_allowed_mcp, "Разрешённые MCP",
             "Ограничение MCP для этого чата. По одному значению на строку:\n"
             "server_name - разрешить весь сервер;\n"
             "tool_name - разрешить tool с таким именем;\n"
             "server_name__tool_name - разрешить конкретный tool конкретного сервера.\n"
-            "Пусто = наследовать общий доступ."
+            "Пусто = наследовать общий доступ.",
         )
-        self.chat_media_stt.setToolTip("inherit - использовать настройку владельца, on/off - переопределить STT для этого чата.")
-        self.chat_media_images.setToolTip("inherit - использовать настройку владельца, on/off - переопределить обработку фото для этого чата.")
-        self.events.setToolTip("Последние события secretary-flow для выбранного владельца.")
+        _tip(self.chat_media_stt, "Голос/STT в чате", "inherit - использовать настройку владельца, on/off - переопределить STT для этого чата.")
+        _tip(self.chat_media_images, "Фото/VLM в чате", "inherit - использовать настройку владельца, on/off - переопределить обработку фото для этого чата.")
+        _tip(self.events, "Журнал", "Последние события secretary-flow для выбранного владельца.")
 
     def load_profiles(self, select_owner_id: int | None = None):
         db = DatabaseManager()
@@ -376,6 +499,9 @@ class SecretaryTab(QWidget):
             self.table.selectRow(selected_row)
         elif profiles:
             self.table.selectRow(0)
+        else:
+            self.owner_label.setText("Владелец не выбран")
+            self._set_dirty(False)
 
     def _on_selection_changed(self):
         row = self.table.currentRow()
@@ -385,6 +511,9 @@ class SecretaryTab(QWidget):
         if not owner_item:
             return
         self.current_owner_id = int(owner_item.text())
+        name_item = self.table.item(row, 1)
+        owner_name = name_item.text() if name_item else ""
+        self.owner_label.setText(f"{self.current_owner_id}" + (f" · {owner_name}" if owner_name else ""))
         db = DatabaseManager()
         try:
             profile = db.secretary.get_profile(self.current_owner_id) or {}
@@ -394,6 +523,17 @@ class SecretaryTab(QWidget):
             prompt_templates = db.secretary.list_prompt_templates(self.current_owner_id)
         finally:
             db.close()
+        self._loading = True
+        try:
+            self._fill_profile_fields(profile, prompt_history, prompt_templates)
+        finally:
+            self._loading = False
+        self._refresh_chat_options(recent_chats)
+        self._reset_chat_override_form()
+        self.events.setPlainText(self._format_events(events))
+        self._set_dirty(False)
+
+    def _fill_profile_fields(self, profile, prompt_history, prompt_templates):
         self.enabled.setChecked(bool(profile.get("enabled")))
         self.mode.setCurrentText(profile.get("response_mode") or "draft")
         self.prompt.setPlainText(profile.get("system_prompt") or "")
@@ -415,9 +555,6 @@ class SecretaryTab(QWidget):
         self.owner_behavior.setCurrentText(owner_behavior if owner_behavior in self.OWNER_BEHAVIORS else "takeover")
         self.allowed_chats.setPlainText(profile.get("allowed_chats") or "")
         self.blocked_chats.setPlainText(profile.get("blocked_chats") or "")
-        self._refresh_chat_options(recent_chats)
-        self._reset_chat_override_form()
-        self.events.setPlainText(self._format_events(events))
 
     def add_profile(self):
         owner_id, ok = QInputDialog.getText(self, "Добавить владельца", "Telegram ID владельца:")
@@ -530,7 +667,13 @@ class SecretaryTab(QWidget):
         if templates is not None:
             self.secretary_prompt_templates = list(templates or [])
         if prompt_text is not None:
-            self.prompt.setPlainText(prompt_text or "")
+            # Текст уже записывается в БД ниже: само по себе это не «несохранённая правка»
+            was_loading = self._loading
+            self._loading = True
+            try:
+                self.prompt.setPlainText(prompt_text or "")
+            finally:
+                self._loading = was_loading
 
         active_prompt = self.prompt.toPlainText().strip()
         db = DatabaseManager()
@@ -629,6 +772,7 @@ class SecretaryTab(QWidget):
         self.load_profiles(select_owner_id=owner_id)
         if self.current_owner_id == owner_id:
             self._restore_chat_form(chat_state)
+        self._set_dirty(False)
 
     def delete_profile(self):
         if self.current_owner_id is None:
@@ -648,6 +792,7 @@ class SecretaryTab(QWidget):
         finally:
             db.close()
         self.current_owner_id = None
+        self._set_dirty(False)
         self.load_profiles()
 
     @staticmethod
