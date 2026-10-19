@@ -293,7 +293,12 @@ class PromptEditorDialog(QDialog):
         self.original_prompt = prompt_text or ""
         self.placeholder_defaults = dict(placeholder_defaults or {})
         self.history = list(history or [])
-        self.templates = list(templates or [])
+        # Мусор в файле шаблонов (не dict, text=null) пропускаем, значения приводим к строкам
+        self.templates = [
+            {**item, "name": str(item.get("name") or "Без имени"), "text": str(item.get("text") or "")}
+            for item in (templates or [])
+            if isinstance(item, dict)
+        ]
         self._last_applied_prompt = self.original_prompt
         self.placeholder_provider = placeholder_provider or get_available_placeholders
         self.show_defaults = bool(show_defaults)
@@ -367,20 +372,10 @@ class PromptEditorDialog(QDialog):
         self.placeholders_title.setToolTip("")
         self.placeholders_section.setToolTip(placeholders_tooltip)
         self.placeholders_title.hide()
-        self.placeholders_help = QLabel("")
-        self.placeholders_help.setObjectName("placeholdersHelp")
-        self.placeholders_help.setToolTip("")
-        self.placeholders_help.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.placeholders_help.setFixedSize(0, 0)
-        self.placeholders_help.hide()
-        self.placeholders_help.setStyleSheet(
-            "font-weight: 700;"
-        )
         self.placeholders_title.setStyleSheet(
             "font-weight: 700;"
         )
         placeholders_title_row.addWidget(self.placeholders_title)
-        placeholders_title_row.addWidget(self.placeholders_help)
         placeholders_title_row.addStretch()
 
         self.placeholders_group = QFrame()
@@ -484,7 +479,7 @@ class PromptEditorDialog(QDialog):
         pass
 
     def _confirm_discard_changes(self, action_text):
-        if self.prompt_editor.toPlainText() == self._last_applied_prompt:
+        if self.prompt_editor.toPlainText().rstrip() == (self._last_applied_prompt or "").rstrip():
             return True
         reply = QMessageBox.question(
             self,
@@ -574,7 +569,10 @@ class PromptEditorDialog(QDialog):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        self.templates = [item for item in self.templates if item.get("name") != template.get("name")]
+        # Удаляем только выбранный шаблон, а не все с таким же именем
+        row = self.templates_list.row(current_item)
+        if 0 <= row < len(self.templates):
+            del self.templates[row]
         self._refresh_templates()
         self.panel.persist_prompt_editor_state(
             placeholder_defaults=self.placeholder_defaults,
