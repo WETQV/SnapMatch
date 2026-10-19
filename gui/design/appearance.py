@@ -16,7 +16,7 @@ from PyQt6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette
 from PyQt6.QtWidgets import QApplication, QColorDialog, QFrame, QHBoxLayout, QWidget
 
 from gui.design import icons, motion
-from gui.design.tokens import BRAND_ACCENT, build_qss, make_tokens
+from gui.design.tokens import ACCENT_PRESETS as PRESETS, BRAND_ACCENT, build_qss, make_tokens
 from gui.design.widgets import (
     FxButton, GlowRoot, IconTile, ServerCard, StatusBadge, Swatch, Switch, SwitchRow, ThemeCard, WinButton,
     card, label, refresh_icons,
@@ -28,7 +28,6 @@ logger = setup_logger(__name__)
 
 DEFAULTS = {"ui_theme": "dark", "ui_accent": "brand", "ui_frameless": False, "ui_animations": True}
 THEMES = (("system", "Системная"), ("dark", "Тёмная"), ("light", "Светлая"), ("oled", "OLED"))
-PRESETS = (("#4C8DFF", "Синий"), ("#8A6BFF", "Фиолетовый"), ("#F29D38", "Оранжевый"), ("#E866A8", "Розовый"))
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _REPAINT = (GlowRoot, StatusBadge, IconTile, ServerCard, WinButton, Switch, FxButton, ThemeCard, Swatch)
 

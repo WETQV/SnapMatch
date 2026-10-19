@@ -10,6 +10,8 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
 BRAND_ACCENT = "#22C58B"
+# Готовые акценты для выбора в «Оформлении» (hex, название)
+ACCENT_PRESETS = (("#4C8DFF", "Синий"), ("#8A6BFF", "Фиолетовый"), ("#F29D38", "Оранжевый"), ("#E866A8", "Розовый"))
 
 # Общие для всех тем цвета «поверх акцента/на тёмном»: ручка переключателя, красная кнопка закрытия окна.
 _COMMON = {"knob": "#FFFFFF", "win_close": "#E5484D"}
