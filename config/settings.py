@@ -116,7 +116,11 @@ class SettingsManager:
                 "respond_only_on_mention": False,
                 "reject_empty_mentions": True,
                 "secretary_mode": default_secretary_mode(),
-                "oled_mode": False,
+                "oled_mode": False,   # устарел: источник правды — ui_theme (значение синхронизируется)
+                "ui_theme": "dark",       # system | dark | light | oled
+                "ui_accent": "brand",     # system | brand | #RRGGBB
+                "ui_frameless": False,    # собственная рамка окна
+                "ui_animations": True,
                 "stt_enabled": False,
                 "stt_engine": "vosk",  # "vosk", "openai", "groq"
                 "stt_model_path": "assets/models/stt/vosk",
@@ -197,6 +201,7 @@ class SettingsManager:
         self._ensure_rich_messages_defaults()
         if 'oled_mode' not in self.settings:
             self.settings['oled_mode'] = False
+        self._ensure_ui_defaults()
         if 'stt_enabled' not in self.settings:
             self.settings['stt_enabled'] = False
         if 'stt_engine' not in self.settings:
@@ -614,6 +619,14 @@ class SettingsManager:
         self._ensure_secretary_defaults()
         self.save_settings()
 
+    def _ensure_ui_defaults(self):
+        """Настройки оформления. Миграция: старый oled_mode=True без ui_theme -> ui_theme='oled'."""
+        if 'ui_theme' not in self.settings:
+            self.settings['ui_theme'] = 'oled' if self.settings.get('oled_mode') else 'dark'
+        self.settings.setdefault('ui_accent', 'brand')
+        self.settings.setdefault('ui_frameless', False)
+        self.settings.setdefault('ui_animations', True)
+
     def reload_settings(self):
         self.load_settings()
         if 'admin_telegram_ids' not in self.settings:
@@ -627,6 +640,7 @@ class SettingsManager:
         self._ensure_bot_access_policy()
         self._ensure_audit_retention_settings()
         self._ensure_secretary_defaults()
+        self._ensure_ui_defaults()
         # Обновляем счетчики загрузки моделей
         self.model_loads = {model["id"]: self.model_loads.get(model["id"], 0) 
                            for model in self.settings.get("models", [])}
