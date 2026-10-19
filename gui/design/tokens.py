@@ -124,7 +124,7 @@ QFrame#divider {{ background: {t['border']}; max-height: 1px; border: none; }}
    поэтому для неё QSS оставляет только размеры и цвет текста. */
 QPushButton {{
     background: {t['surface_alt']}; border: 1px solid {t['border']}; border-radius: 9px;
-    padding: 7px 14px; min-height: 18px; font-weight: 600;
+    padding: 4px 12px; min-height: 18px; font-weight: 600;
 }}
 QPushButton:hover {{ background: {t['hover_fill']}; border-color: {t['text_muted']}; }}
 QPushButton:pressed {{ background: {sel}; border-color: {acc}; }}
@@ -154,7 +154,7 @@ QToolButton:pressed, QToolButton:checked {{ background: {sel}; }}
 /* ── Поля ввода ───────────────────────────────────── */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit, QDateTimeEdit, QPlainTextEdit, QTextEdit {{
     background: {t['input_bg']}; border: 1px solid {t['border']};
-    border-radius: {r - 3}px; padding: 8px 11px; selection-background-color: {acc}; selection-color: {t['accent_text']};
+    border-radius: {r - 3}px; padding: 6px 11px; selection-background-color: {acc}; selection-color: {t['accent_text']};
 }}
 QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit, QDateTimeEdit {{ padding: 6px 8px; }}
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QPlainTextEdit:hover, QTextEdit:hover {{ border-color: {t['text_muted']}; }}

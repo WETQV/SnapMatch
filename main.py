@@ -371,6 +371,12 @@ if __name__ == '__main__':
         sys.exit(0)
 
     app = QApplication(sys.argv)
+    # Дизайн-система: шрифты, стиль Fusion, подсказки и тема — до показа любых окон
+    from gui.design import appearance
+    from gui.design.tooltip import TooltipManager
+    appearance.load_fonts(app)
+    appearance.init(app).apply()
+    tooltip_manager = TooltipManager(app)
     atexit.register(release_single_instance_lock, single_instance_lock)
 
     # Ctrl+C / kill / завершение сеанса: выходим из event loop, дальше штатно останавливаются

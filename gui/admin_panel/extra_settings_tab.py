@@ -2,10 +2,11 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QGroupBox, QFormLayout, QCheckBox, QComboBox, QLineEdit, QMessageBox
+    QGroupBox, QFormLayout, QCheckBox, QComboBox, QLineEdit, QMessageBox, QScrollArea, QFrame
 )
 
 from config.settings import settings_manager
+from gui.design.appearance import AppearanceCard
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -26,6 +27,9 @@ class ExtraSettingsTab(QWidget):
         top_bar.addStretch()
         top_bar.addWidget(save_btn_top)
         layout.addLayout(top_bar)
+
+        # Оформление (тема, акцент, рамка, анимации): применяется сразу и сохраняется само
+        layout.addWidget(AppearanceCard(notify=self._notify))
 
         settings = settings_manager.get_settings()
 
@@ -194,15 +198,6 @@ class ExtraSettingsTab(QWidget):
         )
         form.addRow("Режим обработки в группах:", self.cb_group_parallel)
 
-        # 🆕 OLED режим (перенесён в самый низ)
-        self.cb_oled = QCheckBox("OLED режим (True Black)")
-        self.cb_oled.setChecked(settings.get('oled_mode', False))
-        self.cb_oled.setToolTip(
-            "Заменяет тёмно-серый фон на абсолютно чёрный (#000000).\n"
-            "Помогает экономить заряд на OLED-дисплеях и уменьшает нагрузку на глаза ночью."
-        )
-        form.addRow("Внешний вид:", self.cb_oled)
-
         # 🆕 Пометка голосовых сообщений
         self.cb_stt_annotate = QCheckBox("Акцентировать внимание на голосовых и кружочках")
         self.cb_stt_annotate.setChecked(settings.get('stt_annotate', False))
@@ -228,11 +223,27 @@ class ExtraSettingsTab(QWidget):
         layout.addWidget(group)
         layout.addStretch()
 
-        self.setLayout(layout)
+        # Карточка оформления + длинная форма не помещаются в окно целиком — оборачиваем в прокрутку
+        content = QWidget()
+        content.setLayout(layout)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+        self.setLayout(outer)
 
         # Подпункты Rich доступны только при включённом «Rich Messages»
         self.cb_rich_messages.toggled.connect(self._update_rich_controls)
         self._update_rich_controls(self.cb_rich_messages.isChecked())
+
+    def _notify(self, text):
+        """Показывает короткое уведомление (тост) главного окна, если оно есть."""
+        toast = getattr(self.window(), 'toast', None)
+        if toast is not None:
+            toast.show_message(text)
 
     def _update_rich_controls(self, enabled):
         for widget in (self.rich_format_combo, self.cb_rich_fallback, self.cb_rich_streaming):
@@ -275,7 +286,6 @@ class ExtraSettingsTab(QWidget):
             "apply_in_groups": self.cb_bot_policy_groups.isChecked(),
             "apply_in_secretary": self.cb_bot_policy_secretary.isChecked(),
         }
-        settings['oled_mode'] = self.cb_oled.isChecked()
         settings['stt_annotate'] = self.cb_stt_annotate.isChecked()
         settings['stream_mode'] = self.cb_stream_draft.isChecked()
 
@@ -286,10 +296,5 @@ class ExtraSettingsTab(QWidget):
             QMessageBox.warning(self, "Ошибка", "Не удалось сохранить дополнительные настройки.")
             return
         logger.info("Дополнительные настройки сохранены")
-
-        # Применяем тему OLED если нужно
-        parent_window = self.window()
-        if hasattr(parent_window, 'apply_theme'):
-            parent_window.apply_theme()
 
         QMessageBox.information(self, "Сохранено", "Настройки сохранены и применены. Текущие процессы не прерваны.")

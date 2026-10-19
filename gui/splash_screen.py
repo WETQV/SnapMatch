@@ -94,6 +94,15 @@ class SplashScreen(QSplashScreen):
         self.c_bg_bottom = QColor(11, 12, 19)
         self.c_green = QColor(0x18, 0xB4, 0x76)
         self.c_green_dark = QColor(0x00, 0x5D, 0x40)
+        # Акцент заставки берём из текущих токенов дизайн-системы (если оформление уже применено)
+        try:
+            from gui.design.tokens import tokens
+            _accent = tokens().get("accent")
+            if _accent:
+                self.c_green = QColor(_accent)
+                self.c_green_dark = QColor(_accent).darker(190)
+        except Exception:
+            pass
         self.c_red = QColor(0xF5, 0x29, 0x29)
         self.c_red_dark = QColor(0x8F, 0x18, 0x18)
         self.c_violet = QColor(124, 92, 255)

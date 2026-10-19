@@ -83,6 +83,12 @@ class TooltipManager(QObject):
         app.installEventFilter(self)
 
     def eventFilter(self, obj, event):  # noqa: N802
+        try:
+            return self._filter(obj, event)
+        except RuntimeError:          # подсказка уже удалена (завершение приложения)
+            return False
+
+    def _filter(self, obj, event) -> bool:
         kind = event.type()
         if kind == QEvent.Type.ToolTip and isinstance(obj, QWidget):
             text = obj.toolTip()

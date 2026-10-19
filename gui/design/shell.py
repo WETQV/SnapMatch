@@ -132,6 +132,12 @@ class FrameController(QObject):
             self._edge_cursor = False
 
     def eventFilter(self, obj, event):  # noqa: N802
+        try:
+            return self._filter(obj, event)
+        except RuntimeError:          # окно уже удалено (завершение приложения)
+            return False
+
+    def _filter(self, obj, event) -> bool:
         w = self.window
         kind = event.type()
         if obj is w and kind == QEvent.Type.WindowStateChange:
