@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 from gui.async_worker import run_in_background
 from bot.handlers.services.mcp_permissions import allowed_tools_for_context
@@ -280,7 +280,12 @@ class McpTab(QWidget):
         self.preview_button.clicked.connect(self.preview_access)
         self.save_button.clicked.connect(self.save_settings)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        self.filter_input.textChanged.connect(self._apply_filter)
+        # Debounce: фильтр применяется через 200 мс после последнего ввода
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(200)
+        self._filter_timer.timeout.connect(self._apply_filter)
+        self.filter_input.textChanged.connect(lambda _text: self._filter_timer.start())
         for checkbox in (self.access_admin, self.access_private, self.access_group, self.access_secretary):
             checkbox.toggled.connect(self._sync_access_json_from_checks)
 
@@ -301,7 +306,7 @@ class McpTab(QWidget):
         self.args.setToolTip("Аргументы запуска MCP-сервера. Один аргумент на строку.")
         self.cwd.setToolTip("Рабочая папка для stdio-сервера. Можно оставить пустой.")
         self.url.setToolTip("URL MCP-сервера для transport sse или streamable_http.")
-        self.env.setToolTip("Переменные окружения в JSON. Секреты маскируются в интерфейсе и логах.")
+        self.env.setToolTip("Переменные окружения в JSON. Значения показываются как есть, не храните там лишних секретов.")
         self.server_enabled.setToolTip("Разрешить использовать этот сервер при запросах к модели.")
         self.auto_start.setToolTip("Пометка автозапуска сервера. Полноценный persistent pool ещё не включён.")
         self.access_admin.setToolTip("Разрешить tools этого сервера администраторам.")
@@ -416,6 +421,15 @@ class McpTab(QWidget):
             "description": "Простой локальный MCP-пример: ping, current_time, format_note, summarize_numbers.",
         }
         if existing_index >= 0:
+            reply = QMessageBox.question(
+                self,
+                "Пример MCP-сервера",
+                "Сервер «snapmatch-simple-example» уже есть. Перезаписать его настройки примером?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
             servers[existing_index] = {**servers[existing_index], **config}
             select_row = existing_index
         else:
@@ -428,6 +442,16 @@ class McpTab(QWidget):
     def delete_server(self):
         servers = self._servers()
         if self.current_row < 0 or self.current_row >= len(servers):
+            return
+        name = servers[self.current_row].get("name", "") if isinstance(servers[self.current_row], dict) else ""
+        reply = QMessageBox.question(
+            self,
+            "Удалить MCP-сервер",
+            f"Удалить MCP-сервер «{name}» из настроек?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
         del servers[self.current_row]
         settings_manager.settings.setdefault("mcp", {})["servers"] = servers
@@ -567,11 +591,9 @@ class McpTab(QWidget):
 
         def _failed(message):
             QMessageBox.warning(self, "MCP start", f"Не удалось запустить сервер: {message}")
-            self.refresh_audit()
             self.load_settings(select_name=selected_name)
 
         def _started(result):
-            self.refresh_audit()
             self.load_settings(select_name=selected_name)
             QMessageBox.information(
                 self,
@@ -591,11 +613,9 @@ class McpTab(QWidget):
 
         def _failed(message):
             QMessageBox.warning(self, "MCP stop", f"Не удалось остановить сервер: {message}")
-            self.refresh_audit()
             self.load_settings(select_name=selected_name)
 
         def _stopped(result):
-            self.refresh_audit()
             self.load_settings(select_name=selected_name)
             QMessageBox.information(
                 self,
@@ -690,7 +710,9 @@ class McpTab(QWidget):
         try:
             current = json.loads(self.access.toPlainText() or "{}")
         except json.JSONDecodeError:
-            current = {}
+            # Не затираем ручной ввод: сначала нужно исправить JSON
+            QMessageBox.warning(self, "MCP access", "Access JSON содержит ошибку. Исправьте его — флажки не изменили текст.")
+            return
         self.access.setPlainText(json.dumps(self._access_from_checks(current), ensure_ascii=False, indent=2))
 
     def _status_by_server(self):
