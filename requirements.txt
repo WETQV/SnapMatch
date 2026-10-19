@@ -8,3 +8,4 @@ httpx
 mistune
 tiktoken
 mcp
+qtawesome

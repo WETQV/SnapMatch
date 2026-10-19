@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 import sys
-from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 # Local Vosk support is optional. Build it only when explicitly requested:
 # SNAPMATCH_BUNDLE_VOSK=1 pyinstaller snapmatch.spec
@@ -152,7 +152,12 @@ hiddenimports.extend(my_hiddenimports)
 project_root = SPECPATH
 repo_root = os.path.abspath(os.path.join(project_root, ".."))
 
+# Иконки qtawesome (шрифты Material Design Icons) и шрифты дизайн-системы
+datas += collect_data_files('qtawesome')
+hiddenimports += ['qtawesome']
+
 extra_datas = [
+    (os.path.join('gui', 'design', 'fonts'), os.path.join('gui', 'design', 'fonts')),
     (os.path.join('assets', 'icon.svg'), 'assets'),
     (os.path.join('assets', 'icon3.ico'), 'assets'),
     (os.path.join('assets', 'icon3.png'), 'assets'),
