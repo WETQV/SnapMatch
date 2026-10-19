@@ -15,6 +15,9 @@ logger = setup_logger(__name__)
 class VoiceSettingsTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Несохранённые ввод по движкам: {движок: (ключ, модель, base_url)}
+        self._engine_drafts = {}
+        self._active_engine = None
         self._init_ui()
 
     def _init_ui(self):
@@ -84,7 +87,11 @@ class VoiceSettingsTab(QWidget):
         # 🆕 Проверка FFmpeg
         self.lbl_ffmpeg_status = QLabel("Проверка FFmpeg...")
         ffmpeg_layout = QHBoxLayout()
-        ffmpeg_layout.addWidget(self.lbl_ffmpeg_status)
+        ffmpeg_layout.addWidget(self.lbl_ffmpeg_status, 1)
+        btn_ffmpeg_help = QPushButton("Как установить FFmpeg")
+        btn_ffmpeg_help.setToolTip("Подсказка по установке FFmpeg для вашей системы.")
+        btn_ffmpeg_help.clicked.connect(self._show_ffmpeg_help)
+        ffmpeg_layout.addWidget(btn_ffmpeg_help)
         vosk_form.addRow("Статус FFmpeg:", ffmpeg_layout)
 
         self.lbl_model_status = QLabel("Проверка модели...")
@@ -140,25 +147,43 @@ class VoiceSettingsTab(QWidget):
         if self.lbl_custom_base_url:
             self.lbl_custom_base_url.setVisible(engine == "custom")
         
+        # Запоминаем несохранённый ввод предыдущего облачного движка
+        self._stash_current_engine()
+        self._active_engine = engine
+
         settings = settings_manager.get_settings()
-        if engine == "openai":
-            self.le_cloud_key.setText(settings.get('stt_openai_key', ''))
-            self.le_cloud_model.setText(settings.get('stt_openai_model', 'whisper-1'))
-            self._update_help_text("openai")
-        elif engine == "groq":
-            self.le_cloud_key.setText(settings.get('stt_groq_key', ''))
-            self.le_cloud_model.setText(settings.get('stt_groq_model', 'whisper-large-v3-turbo'))
-            self._update_help_text("groq")
-        elif engine == "custom":
-            self.le_cloud_key.setText(settings.get('stt_custom_key', ''))
-            self.le_cloud_model.setText(settings.get('stt_custom_model', 'whisper-1'))
-            self.le_custom_base_url.setText(settings.get('stt_custom_base_url', 'http://localhost:8000/v1'))
-            self._update_help_text("custom")
+        if engine in ("openai", "groq", "custom"):
+            defaults = {
+                "openai": ('stt_openai_key', 'stt_openai_model', 'whisper-1'),
+                "groq": ('stt_groq_key', 'stt_groq_model', 'whisper-large-v3-turbo'),
+                "custom": ('stt_custom_key', 'stt_custom_model', 'whisper-1'),
+            }[engine]
+            draft = self._engine_drafts.get(engine)
+            if draft is not None:
+                key, model, base_url = draft
+            else:
+                key = settings.get(defaults[0], '')
+                model = settings.get(defaults[1], defaults[2])
+                base_url = settings.get('stt_custom_base_url', 'http://localhost:8000/v1')
+            self.le_cloud_key.setText(key)
+            self.le_cloud_model.setText(model)
+            if engine == "custom":
+                self.le_custom_base_url.setText(base_url)
+            self._update_help_text(engine)
         else:  # vosk
             self._update_help_text("vosk")
             
         if engine == "vosk":
             self._check_ffmpeg()
+
+    def _stash_current_engine(self):
+        engine = self._active_engine
+        if engine in ("openai", "groq", "custom"):
+            self._engine_drafts[engine] = (
+                self.le_cloud_key.text(),
+                self.le_cloud_model.text(),
+                self.le_custom_base_url.text(),
+            )
 
     def _update_help_text(self, engine):
         """Обновляет текст справки в зависимости от выбранного движка"""
@@ -279,6 +304,13 @@ class VoiceSettingsTab(QWidget):
         settings['stt_engine'] = engine
         settings['stt_model_path'] = self.lbl_path.text()
         
+        self._stash_current_engine()
+        # Значения других облачных движков, введённые до переключения, тоже сохраняем
+        for other, (okey, omodel, _url) in self._engine_drafts.items():
+            if other in ("openai", "groq") and other != engine:
+                settings[f'stt_{other}_key'] = okey.strip()
+                settings[f'stt_{other}_model'] = omodel.strip()
+
         if engine == "openai":
             settings['stt_openai_key'] = self.le_cloud_key.text().strip()
             settings['stt_openai_model'] = self.le_cloud_model.text().strip()
