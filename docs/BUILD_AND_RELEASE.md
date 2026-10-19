@@ -15,7 +15,7 @@
 build.bat
 ```
 
-Скрипт устанавливает зависимости из `requirements.txt`, создаёт `version_info.txt`, очищает старые `build/` и `dist/`, запускает PyInstaller и собирает обычный установщик. Исполняемый файл кладётся в:
+Скрипт устанавливает зависимости из `requirements-build.txt` (это `requirements.txt` плюс PyInstaller), создаёт `version_info.txt`, очищает старые `build/` и `dist/`, запускает PyInstaller и собирает обычный установщик. Исполняемый файл кладётся в:
 
 ```txt
 dist\SnapMatch.exe
@@ -31,7 +31,7 @@ UPX для `SnapMatch.exe` отключён через `upx=False` в `snapmatch
 
 Обычный Windows installer не включает локальное распознавание Vosk и FFmpeg. Для облачного распознавания голосовых сообщений они не нужны.
 
-Вариант с локальным Vosk собирается отдельно командой `build_vosk.bat`. Для него нужны `requirements-local-stt.txt`, модель Vosk и FFmpeg. Сборка ищет FFmpeg в соседней папке:
+Вариант с локальным Vosk собирается отдельно командой `build_vosk.bat`. Для него нужны `requirements-local-stt.txt` и `requirements-build.txt`, модель Vosk и FFmpeg. Сборка ищет FFmpeg в соседней папке:
 
 ```txt
 ..\ffmpeg-2026-01-26-git-fe0813d6e2-essentials_build\bin\ffmpeg.exe

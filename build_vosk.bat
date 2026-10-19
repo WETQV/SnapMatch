@@ -17,6 +17,7 @@ echo.
 
 echo Installing dependencies...
 pip install -r requirements-local-stt.txt
+pip install -r requirements-build.txt
 if errorlevel 1 (
     echo ERROR: Failed to install dependencies!
     pause
@@ -27,7 +28,7 @@ echo.
 echo Checking PyInstaller...
 pip show pyinstaller >nul 2>&1 || (
     echo Installing PyInstaller...
-    pip install pyinstaller
+    pip install -r requirements-build.txt
 )
 
 echo Creating version info file...
@@ -126,7 +127,7 @@ if exist "dist\SnapMatch_Vosk.exe" (
     echo Check the logs above for error details.
     echo.
     echo Common issues:
-    echo - Missing dependencies (install with: pip install -r requirements.txt)
+    echo - Missing dependencies (install with: pip install -r requirements-build.txt)
     echo - Icon file not found (check assets\icon3.ico)
     echo - PyInstaller errors (check Python version compatibility)
 )

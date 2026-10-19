@@ -28,6 +28,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Для сборки `.exe` / `.deb` используйте `requirements-build.txt` (то же самое плюс PyInstaller).
+
 После запуска откройте вкладку настроек, укажите Telegram token, добавьте модель и сохраните конфигурацию.
 
 ## Документация
