@@ -127,7 +127,7 @@ class SettingsManager:
                 "stt_model_path": "assets/models/stt/vosk",
                 "stt_annotate": False,
                 "stt_openai_key": "",
-                "stt_openai_model": "whisper-1",
+                "stt_openai_model": "gpt-transcribe",
                 "stt_groq_key": "",
                 "stt_groq_model": "whisper-large-v3",
                 "stt_custom_key": "",
@@ -214,7 +214,10 @@ class SettingsManager:
         if 'stt_openai_key' not in self.settings:
             self.settings['stt_openai_key'] = ""
         if 'stt_openai_model' not in self.settings:
-            self.settings['stt_openai_model'] = "whisper-1"
+            self.settings['stt_openai_model'] = "gpt-transcribe"
+        # whisper-1 и gpt-4o-*transcribe отключаются 26.02.2027: до этой даты сохранённое значение рабочее
+        from utils.openai_models import migrate_stt_settings
+        migrate_stt_settings(self.settings)
         if 'stt_groq_key' not in self.settings:
             self.settings['stt_groq_key'] = ""
         if 'stt_groq_model' not in self.settings:

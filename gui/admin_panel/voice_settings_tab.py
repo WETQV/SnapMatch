@@ -3,14 +3,18 @@
 import importlib.util
 import os
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QFileDialog, QSizePolicy,
+    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QLabel, QFileDialog, QSizePolicy,
 )
 from PyQt6.QtCore import Qt
 from config.settings import settings_manager
+from gui.async_worker import run_in_background
 from gui.design.dialogs import ask, inform, warn
 from gui.admin_panel.ui_common import BadgeSlot, field, vertical_scroll
 from gui.design import FxButton, FxComboBox, SwitchRow, card, label, page_header, primary
 from utils.logger import setup_logger
+from utils.openai_models import (
+    DEFAULT_STT_MODEL, LEGACY_REMOVAL_DATE, OPENAI_BASE_URL, fallback_models, get_stt_models, is_legacy_stt_model,
+)
 from utils.voice_processor import resolve_ffmpeg_path
 
 logger = setup_logger(__name__)
@@ -21,6 +25,8 @@ class VoiceSettingsTab(QWidget):
         # Несохранённые ввод по движкам: {движок: (ключ, модель, base_url)}
         self._engine_drafts = {}
         self._active_engine = None
+        self._models_request = 0
+        self._asked_migration = False
         self._init_ui()
 
     def _init_ui(self):
@@ -71,11 +77,19 @@ class VoiceSettingsTab(QWidget):
         self.le_cloud_key.setToolTip("API ключ\nКлюч для выбранного облачного сервиса.")
         cloud_lay.addLayout(field("API КЛЮЧ", self.le_cloud_key))
 
-        self.le_cloud_model = QLineEdit()
+        # Редактируемый список: для OpenAI подгружается из /models, ручной ввод сохраняется
+        self.le_cloud_model = FxComboBox()
+        self.le_cloud_model.setEditable(True)
+        self.le_cloud_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.le_cloud_model.setToolTip(
-            "Модель\nНазвание модели для распознавания (например, whisper-1 для OpenAI или whisper-large-v3 для Groq)."
+            "Модель\nНазвание модели для распознавания (gpt-transcribe для OpenAI, whisper-large-v3 для Groq).\n"
+            "Для OpenAI список подгружается с сервера; можно ввести своё имя."
         )
+        self.le_cloud_model.editTextChanged.connect(self._update_model_note)
         cloud_lay.addLayout(field("МОДЕЛЬ", self.le_cloud_model))
+        self.lbl_model_note = BadgeSlot("", "error")
+        self.lbl_model_note.setVisible(False)
+        cloud_lay.addWidget(self.lbl_model_note)
 
         self.le_custom_base_url = QLineEdit()
         self.le_custom_base_url.setPlaceholderText("http://localhost:8000/v1")
@@ -174,7 +188,7 @@ class VoiceSettingsTab(QWidget):
         settings = settings_manager.get_settings()
         if engine in ("openai", "groq", "custom"):
             defaults = {
-                "openai": ('stt_openai_key', 'stt_openai_model', 'whisper-1'),
+                "openai": ('stt_openai_key', 'stt_openai_model', DEFAULT_STT_MODEL),
                 "groq": ('stt_groq_key', 'stt_groq_model', 'whisper-large-v3-turbo'),
                 "custom": ('stt_custom_key', 'stt_custom_model', 'whisper-1'),
             }[engine]
@@ -186,7 +200,12 @@ class VoiceSettingsTab(QWidget):
                 model = settings.get(defaults[1], defaults[2])
                 base_url = settings.get('stt_custom_base_url', 'http://localhost:8000/v1')
             self.le_cloud_key.setText(key)
-            self.le_cloud_model.setText(model)
+            self.le_cloud_model.setEditText(model)
+            if engine == "openai":
+                self._load_openai_models(key)
+            else:
+                self._models_request += 1
+                self._set_model_items([])
             if engine == "custom":
                 self.le_custom_base_url.setText(base_url)
             self._update_help_text(engine)
@@ -196,12 +215,45 @@ class VoiceSettingsTab(QWidget):
         if engine == "vosk":
             self._check_ffmpeg()
 
+    # ───────── список моделей OpenAI ─────────
+    def _set_model_items(self, entries):
+        """Подставляет список моделей, не трогая введённый текст."""
+        combo = self.le_cloud_model
+        text = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems([e["id"] for e in entries])
+        combo.setEditText(text)
+        combo.blockSignals(False)
+
+    def _load_openai_models(self, api_key):
+        """Сразу запасной список, затем в фоне актуальный (кэш 24 ч или GET /models)."""
+        self._models_request += 1
+        request = self._models_request
+        self._set_model_items(fallback_models())
+        self._update_model_note()
+
+        def apply(entries):
+            if request == self._models_request and self._active_engine == "openai":
+                self._set_model_items(entries)
+
+        run_in_background(get_stt_models, OPENAI_BASE_URL, api_key.strip(), on_done=apply, on_error=lambda _e: None)
+
+    def _update_model_note(self, *_):
+        model = self.le_cloud_model.currentText().strip()
+        show = self._active_engine == "openai" and is_legacy_stt_model(model)
+        self.lbl_model_note.setVisible(show)
+        if show:
+            self.lbl_model_note.set(
+                f"Модель устарела (отключение {LEGACY_REMOVAL_DATE:%d.%m.%Y}), заменится на {DEFAULT_STT_MODEL}", "error"
+            )
+
     def _stash_current_engine(self):
         engine = self._active_engine
         if engine in ("openai", "groq", "custom"):
             self._engine_drafts[engine] = (
                 self.le_cloud_key.text(),
-                self.le_cloud_model.text(),
+                self.le_cloud_model.currentText(),
                 self.le_custom_base_url.text(),
             )
 
@@ -219,10 +271,10 @@ class VoiceSettingsTab(QWidget):
                 "Минусы: требует скачивания модели, занимает место"
             ),
             "openai": (
-                "OpenAI Whisper — облачное распознавание речи через OpenAI API\n\n"
+                "OpenAI — облачное распознавание речи через OpenAI API\n\n"
                 "Требования:\n"
                 "• Укажите API ключ от OpenAI (https://platform.openai.com/api-keys)\n"
-                "• Модель: 'whisper-1' (по умолчанию)\n"
+                "• Модель: 'gpt-transcribe' (по умолчанию). whisper-1 и gpt-4o-*transcribe устарели, отключение 26.02.2027\n"
                 "• Требуется интернет-соединение\n"
                 "• Требуется активная подписка на OpenAI (платная услуга)\n\n"
                 "Плюсы: высочайшая точность, поддержка 100+ языков\n"
@@ -323,21 +375,29 @@ class VoiceSettingsTab(QWidget):
                 settings[f'stt_{other}_model'] = omodel.strip()
 
         if engine == "openai":
+            model = self.le_cloud_model.currentText().strip() or DEFAULT_STT_MODEL
+            if is_legacy_stt_model(model) and not self._asked_migration:
+                self._asked_migration = True
+                if ask(self, "Устаревшая модель",
+                       f"Модель {model} будет отключена {LEGACY_REMOVAL_DATE:%d.%m.%Y}.\n"
+                       f"Заменить на {DEFAULT_STT_MODEL} сейчас?", yes="Заменить"):
+                    model = DEFAULT_STT_MODEL
+                    self.le_cloud_model.setEditText(model)
             settings['stt_openai_key'] = self.le_cloud_key.text().strip()
-            settings['stt_openai_model'] = self.le_cloud_model.text().strip()
+            settings['stt_openai_model'] = model
         elif engine == "groq":
             settings['stt_groq_key'] = self.le_cloud_key.text().strip()
-            settings['stt_groq_model'] = self.le_cloud_model.text().strip()
+            settings['stt_groq_model'] = self.le_cloud_model.currentText().strip()
         elif engine == "custom":
             base_url = self.le_custom_base_url.text().strip().rstrip('/')
             if not base_url.startswith(('http://', 'https://')):
                 warn(self, "Ошибка", "Base URL должен начинаться с http:// или https://")
                 return
-            if not self.le_cloud_model.text().strip():
+            if not self.le_cloud_model.currentText().strip():
                 warn(self, "Ошибка", "Укажите имя STT-модели")
                 return
             settings['stt_custom_key'] = self.le_cloud_key.text().strip()
-            settings['stt_custom_model'] = self.le_cloud_model.text().strip()
+            settings['stt_custom_model'] = self.le_cloud_model.currentText().strip()
             settings['stt_custom_base_url'] = base_url
 
         try:
