@@ -892,7 +892,10 @@ class _ClipBody(QWidget):
 
 
 class Collapsible(QWidget):
-    """Раскрывающаяся секция с плавной анимацией высоты."""
+    """Раскрывающаяся секция. Высота меняется мгновенно (иначе QScrollArea «дрыгается» и дублирует
+    картинку), плавно проявляется только содержимое — через прозрачность."""
+
+    FADE_MS = 150
 
     def __init__(self, title: str, content: QWidget, expanded: bool = False) -> None:
         super().__init__()
@@ -903,10 +906,7 @@ class Collapsible(QWidget):
         self.body = _ClipBody(content)
         lay.addWidget(self.header)
         lay.addWidget(self.body)
-        self._anim = QVariantAnimation(self)
-        self._anim.setDuration(240)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.valueChanged.connect(lambda v: self.body.setFixedHeight(int(v)))
+        self._fade: QPropertyAnimation | None = None
         self.body.setFixedHeight(0)
         self.body.setVisible(False)
         self.header.toggled.connect(self._on_toggled)
@@ -914,25 +914,36 @@ class Collapsible(QWidget):
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(0, lambda: self._on_toggled(True, animate=False))
 
+    def _stop_fade(self) -> None:
+        if self._fade is not None:
+            self._fade.stop()
+            self._fade = None
+        if self.body.graphicsEffect() is not None:
+            self.body.setGraphicsEffect(None)
+
     def _on_toggled(self, open_: bool, animate: bool = True) -> None:
-        self._anim.stop()
-        try:
-            self._anim.finished.disconnect()
-        except TypeError:
-            pass
-        target = self.body.measure() if open_ else 0
-        if open_:
-            self.body.setVisible(True)
-            self.body.content.setGeometry(0, 0, self.body.width(), self.body.natural)
-        if not (motion.ENABLED and animate):
-            self.body.setFixedHeight(target)
-            self.body.setVisible(open_)
-            return
-        self._anim.setStartValue(self.body.height())
-        self._anim.setEndValue(target)
+        self._stop_fade()
         if not open_:
-            self._anim.finished.connect(lambda: self.body.setVisible(False))
-        self._anim.start()
+            self.body.setFixedHeight(0)
+            self.body.setVisible(False)
+            return
+        target = self.body.measure()
+        self.body.setFixedHeight(target)
+        self.body.setVisible(True)
+        self.body.content.setGeometry(0, 0, self.body.width(), self.body.natural)
+        if not (motion.ENABLED and animate):
+            return
+        eff = QGraphicsOpacityEffect(self.body)
+        eff.setOpacity(0.0)
+        self.body.setGraphicsEffect(eff)
+        anim = QPropertyAnimation(eff, b"opacity", self)
+        anim.setDuration(self.FADE_MS)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(self._stop_fade)
+        self._fade = anim
+        anim.start()
 
 
 # ───────────────────────── помощники сборки страниц ─────────────────────────

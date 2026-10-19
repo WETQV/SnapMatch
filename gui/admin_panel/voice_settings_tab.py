@@ -2,10 +2,11 @@
 
 import os
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QMessageBox, QFileDialog, QSizePolicy,
+    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QFileDialog, QSizePolicy,
 )
 from PyQt6.QtCore import Qt
 from config.settings import settings_manager
+from gui.design.dialogs import ask, inform, warn
 from gui.admin_panel.ui_common import BadgeSlot, field, vertical_scroll
 from gui.design import FxButton, FxComboBox, SwitchRow, card, label, page_header, primary
 from utils.logger import setup_logger
@@ -248,11 +249,7 @@ class VoiceSettingsTab(QWidget):
             "3. Скачайте, распакуйте и укажите путь к папке в настройках.\n\n"
             "Открыть сайт со списком моделей?"
         )
-        reply = QMessageBox.question(
-            self, "Загрузка моделей Vosk", msg, 
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        if ask(self, "Загрузка моделей Vosk", msg):
             import webbrowser
             webbrowser.open("https://alphacephei.com/vosk/models")
 
@@ -284,8 +281,7 @@ class VoiceSettingsTab(QWidget):
                 "Открыть сайт FFmpeg?"
             )
             url = "https://ffmpeg.org/download.html"
-        reply = QMessageBox.question(self, "Установка FFmpeg", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
+        if ask(self, "Установка FFmpeg", msg):
             import webbrowser
             webbrowser.open(url)
 
@@ -329,10 +325,10 @@ class VoiceSettingsTab(QWidget):
         elif engine == "custom":
             base_url = self.le_custom_base_url.text().strip().rstrip('/')
             if not base_url.startswith(('http://', 'https://')):
-                QMessageBox.warning(self, "Ошибка", "Base URL должен начинаться с http:// или https://")
+                warn(self, "Ошибка", "Base URL должен начинаться с http:// или https://")
                 return
             if not self.le_cloud_model.text().strip():
-                QMessageBox.warning(self, "Ошибка", "Укажите имя STT-модели")
+                warn(self, "Ошибка", "Укажите имя STT-модели")
                 return
             settings['stt_custom_key'] = self.le_cloud_key.text().strip()
             settings['stt_custom_model'] = self.le_cloud_model.text().strip()
@@ -342,7 +338,7 @@ class VoiceSettingsTab(QWidget):
             settings_manager.update_settings(**settings)
         except Exception as exc:
             logger.error("Не удалось сохранить настройки голоса: %s", exc)
-            QMessageBox.warning(self, "Ошибка", "Не удалось сохранить настройки голоса.")
+            warn(self, "Ошибка", "Не удалось сохранить настройки голоса.")
             return
         logger.info("Настройки голоса сохранены")
-        QMessageBox.information(self, "Сохранено", "Настройки голоса сохранены.")
+        inform(self, "Сохранено", "Настройки голоса сохранены.")

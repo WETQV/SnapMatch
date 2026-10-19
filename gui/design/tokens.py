@@ -98,7 +98,8 @@ QMessageBox QLabel, QInputDialog QLabel {{ color: {t['text']}; }}
 
 /* ── Боковая панель и навигация ───────────────────── */
 QWidget#sidebar {{ background: transparent; }}
-QLabel#brand {{ font-size: 18px; font-weight: 800; padding: 4px 6px; }}
+QLabel#brand {{ font-size: 18px; font-weight: 800; padding: 0 2px; }}
+QLabel#titleText {{ color: {t['text_muted']}; font-size: 13px; font-weight: 600; }}
 QListWidget#nav {{ background: transparent; border: none; outline: none; }}
 QListWidget#nav::item {{ padding: 11px 14px; margin: 2px 0; border-radius: {r - 2}px; color: {t['text_muted']}; font-weight: 600; }}
 QListWidget#nav::item:hover {{ background: {t['hover_fill']}; color: {t['text']}; }}
@@ -254,7 +255,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QScrollBar:horizontal {{ height: 10px; background: transparent; margin: 2px; }}
 QScrollBar::handle:horizontal {{ background: {t['border']}; border-radius: 4px; min-width: 30px; }}
 QScrollBar::handle:horizontal:hover {{ background: {t['text_muted']}; }}
-QScrollArea {{ background: transparent; border: none; }}
+QScrollArea {{ background: {t['bg']}; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 
 /* ── Служебные элементы ───────────────────────────── */
@@ -272,4 +273,20 @@ QToolTip {{ background: {t['surface_alt']}; color: {t['text']}; border: 1px soli
 QFrame#tipPanel {{ background: {t['surface_alt']}; border: 1px solid {t['border']}; border-radius: {r - 2}px; }}
 QLabel#tipTitle {{ font-weight: 700; font-size: 12px; }}
 QLabel#tipBody {{ color: {t['text_muted']}; font-size: 12px; }}
+
+/* ── Диалоги (gui/design/dialogs.py) ──────────────── */
+QDialog#fxDialog {{ background: transparent; }}
+QFrame#fxDialogCard {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: {r}px; }}
+QLabel#dlgTitle {{ font-size: 13px; font-weight: 700; }}
+QLabel#dlgText {{ font-size: 13px; }}
+QPushButton#dangerSolid {{ color: {t['knob']}; font-weight: 800; }}
+QLineEdit[invalid="true"] {{ border: 1px solid {t['danger']}; }}
 """
+
+# Палитра готовых цветов для выбора цвета (gui/design/dialogs.choose_color). Только здесь допустимы hex-литералы.
+COLOR_PRESETS = (
+    "#22C58B", "#4C8DFF", "#8A6BFF", "#F29D38", "#E866A8", "#F26B67", "#E5B34A", "#2DB7C9",
+    "#1FA971", "#2477E0", "#6B4CE0", "#D9822B", "#C94A8C", "#D6403C", "#B9780F", "#1A94A6",
+    "#8DD66B", "#7FB2FF", "#B7A2FF", "#FFC27A", "#F5A3CC", "#FF9C99", "#F2D487", "#8BDCE8",
+    "#E1E5EC", "#C4CAD6", "#8C95A8", "#5B6478", "#3A4152", "#2B3A4F", "#1E6B52", "#000000",
+)

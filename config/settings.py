@@ -4,6 +4,7 @@ import json
 import os
 import random
 import shutil
+import sys
 import tempfile
 import time
 from utils.encryption import encryption
@@ -119,7 +120,7 @@ class SettingsManager:
                 "oled_mode": False,   # устарел: источник правды — ui_theme (значение синхронизируется)
                 "ui_theme": "dark",       # system | dark | light | oled
                 "ui_accent": "brand",     # system | brand | #RRGGBB
-                "ui_frameless": False,    # собственная рамка окна
+                "ui_frameless": sys.platform.startswith('linux'),    # собственная рамка окна (по умолчанию на Linux)
                 "ui_animations": True,
                 "stt_enabled": False,
                 "stt_engine": "vosk",  # "vosk", "openai", "groq"
@@ -624,7 +625,7 @@ class SettingsManager:
         if 'ui_theme' not in self.settings:
             self.settings['ui_theme'] = 'oled' if self.settings.get('oled_mode') else 'dark'
         self.settings.setdefault('ui_accent', 'brand')
-        self.settings.setdefault('ui_frameless', False)
+        self.settings.setdefault('ui_frameless', sys.platform.startswith('linux'))
         self.settings.setdefault('ui_animations', True)
 
     def reload_settings(self):

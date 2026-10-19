@@ -10,13 +10,34 @@
 иначе у скруглённой рамки остаются квадратные уголки. Без собственной рамки GlowRoot рисует непрозрачный фон.
 """
 from PyQt6.QtCore import QEvent, QObject, Qt
-from PyQt6.QtGui import QCursor, QGuiApplication
+from PyQt6.QtGui import QCursor, QGuiApplication, QPixmap
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMainWindow, QWidget
 
-from gui.design.widgets import GlowRoot, IconTile, WinButton
+from gui.design.widgets import GlowRoot, WinButton
+from utils.resource_manager import get_resource_path
 
 EDGE = 6                 # ширина зоны изменения размера у собственной рамки, px
 FRAME_RADIUS = 12        # скругление окна с собственной рамкой
+
+
+# Цвета букв логотипа (assets/icon3.png / сплеш): плоские, не зависят от акцента и темы
+BRAND_GREEN = "#109C66"
+BRAND_RED = "#E02A2A"
+
+
+def logo_label(size: int) -> QLabel:
+    """QLabel с логотипом assets/icon3.png заданного размера (px), со сглаживанием и учётом HiDPI."""
+    lbl = QLabel()
+    lbl.setFixedSize(size, size)
+    lbl.setStyleSheet("background: transparent;")
+    path = get_resource_path("assets/icon3.png")
+    if path:
+        dpr = max(lbl.devicePixelRatioF(), 2.0)   # запас по резкости на HiDPI
+        pm = QPixmap(path).scaled(int(size * dpr), int(size * dpr), Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.SmoothTransformation)
+        pm.setDevicePixelRatio(dpr)
+        lbl.setPixmap(pm)
+    return lbl
 
 
 def prepare_translucent(window: QMainWindow) -> None:
@@ -36,9 +57,9 @@ class TitleBar(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 0, 6, 0)
         lay.setSpacing(8)
-        lay.addWidget(IconTile("mdi6.hexagon-slice-6", "ok", 24))
+        lay.addWidget(logo_label(20))
         self.title = QLabel(title)
-        self.title.setObjectName("h2")
+        self.title.setObjectName("titleText")   # приглушённый цвет: см. tokens.py
         lay.addWidget(self.title)
         lay.addStretch()
         self.btn_min = WinButton("mdi6.window-minimize")
@@ -49,6 +70,10 @@ class TitleBar(QWidget):
         self.btn_close.clicked.connect(window.close)
         for b in (self.btn_min, self.btn_max, self.btn_close):
             lay.addWidget(b)
+
+    def set_title(self, text: str) -> None:
+        """Подпись в заголовке окна — название текущей страницы."""
+        self.title.setText(text)
 
     def toggle_maximize(self) -> None:
         self.win.showNormal() if self.win.isMaximized() else self.win.showMaximized()

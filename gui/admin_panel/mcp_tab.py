@@ -7,10 +7,8 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QScrollArea,
@@ -22,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 
 from gui.async_worker import run_in_background
+from gui.design.dialogs import ask, inform, prompt_text, warn
 from gui.admin_panel.ui_common import BadgeSlot, shrinkable, vertical_scroll
 from gui.design import (
     FxButton,
@@ -614,7 +613,7 @@ class McpTab(QWidget):
         self.refresh_audit()
 
     def add_server(self):
-        name, ok = QInputDialog.getText(self, "Добавить MCP-сервер", "Имя сервера:")
+        name, ok = prompt_text(self, "Добавить MCP-сервер", "Имя сервера:")
         if not ok or not name.strip():
             return
         servers = self._servers()
@@ -647,14 +646,13 @@ class McpTab(QWidget):
             "description": "Простой локальный MCP-пример: ping, current_time, format_note, summarize_numbers.",
         }
         if existing_index >= 0:
-            reply = QMessageBox.question(
+            if not ask(
                 self,
                 "Пример MCP-сервера",
                 "Сервер «snapmatch-simple-example» уже есть. Перезаписать его настройки примером?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
+                yes="Перезаписать",
+                default="no",
+            ):
                 return
             servers[existing_index] = {**servers[existing_index], **config}
             select_row = existing_index
@@ -670,14 +668,13 @@ class McpTab(QWidget):
         if self.current_row < 0 or self.current_row >= len(servers):
             return
         name = servers[self.current_row].get("name", "") if isinstance(servers[self.current_row], dict) else ""
-        reply = QMessageBox.question(
+        if not ask(
             self,
             "Удалить MCP-сервер",
             f"Удалить MCP-сервер «{name}» из настроек?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+            yes="Удалить",
+            danger=True,
+        ):
             return
         del servers[self.current_row]
         settings_manager.settings.setdefault("mcp", {})["servers"] = servers
@@ -694,7 +691,7 @@ class McpTab(QWidget):
                 env = json.loads(self.env.toPlainText() or "{}")
                 access = json.loads(self.access.toPlainText() or "{}")
             except json.JSONDecodeError as e:
-                QMessageBox.warning(self, "Ошибка", f"Некорректный JSON: {e}")
+                warn(self, "Ошибка", f"Некорректный JSON: {e}")
                 return
             existing = dict(servers[self.current_row])
             existing.update({
@@ -723,12 +720,12 @@ class McpTab(QWidget):
             message = "MCP Python SDK не установлен или недоступен."
             if details:
                 message = f"{message}\n\nДетали: {details}"
-            QMessageBox.warning(self, "MCP SDK", message)
+            warn(self, "MCP SDK", message)
             return
         self.save_settings()
         servers = self._servers()
         if self.current_row < 0 or self.current_row >= len(servers):
-            QMessageBox.information(self, "MCP", "Выберите MCP-сервер.")
+            inform(self, "MCP", "Выберите MCP-сервер.")
             return
         # Обращение к серверу (до 20 с) идёт в фоне — окно не замирает
         row = self.current_row
@@ -736,7 +733,7 @@ class McpTab(QWidget):
         self._run_busy(
             lambda: discover_server_capabilities(server_cfg),
             lambda caps: self._on_discovered(caps, row),
-            lambda msg: QMessageBox.warning(self, "MCP discovery", f"Не удалось проверить сервер: {msg}"),
+            lambda msg: warn(self, "MCP discovery", f"Не удалось проверить сервер: {msg}"),
         )
 
     def _run_busy(self, fn, on_done, on_error):
@@ -810,12 +807,12 @@ class McpTab(QWidget):
                     self._select_row(index, reload_fields=False)
                     break
         if self.current_row < 0 or self.current_row >= len(servers):
-            QMessageBox.information(self, "MCP", "Выберите MCP-сервер.")
+            inform(self, "MCP", "Выберите MCP-сервер.")
             return
         server_cfg = servers[self.current_row]
 
         def _failed(message):
-            QMessageBox.warning(self, "MCP start", f"Не удалось запустить сервер: {message}")
+            warn(self, "MCP start", f"Не удалось запустить сервер: {message}")
             self.load_settings(select_name=selected_name)
 
         def _started(result):
@@ -828,12 +825,12 @@ class McpTab(QWidget):
         selected_name = self._selected_server_name()
         servers = self._servers()
         if self.current_row < 0 or self.current_row >= len(servers):
-            QMessageBox.information(self, "MCP", "Выберите MCP-сервер.")
+            inform(self, "MCP", "Выберите MCP-сервер.")
             return
         server_cfg = servers[self.current_row]
 
         def _failed(message):
-            QMessageBox.warning(self, "MCP stop", f"Не удалось остановить сервер: {message}")
+            warn(self, "MCP stop", f"Не удалось остановить сервер: {message}")
             self.load_settings(select_name=selected_name)
 
         def _stopped(result):
@@ -847,7 +844,7 @@ class McpTab(QWidget):
             actor_id = int(self.preview_actor.text().strip()) if self.preview_actor.text().strip() else None
             chat_id = int(self.preview_chat.text().strip()) if self.preview_chat.text().strip() else None
         except ValueError:
-            QMessageBox.warning(self, "MCP access", "actor_telegram_id и chat_id должны быть числами.")
+            warn(self, "MCP access", "actor_telegram_id и chat_id должны быть числами.")
             return
         request_context = {
             "source_mode": self.preview_source.currentText(),
@@ -932,7 +929,7 @@ class McpTab(QWidget):
             current = json.loads(self.access.toPlainText() or "{}")
         except json.JSONDecodeError:
             # Не затираем ручной ввод: сначала нужно исправить JSON
-            QMessageBox.warning(self, "MCP access", "Access JSON содержит ошибку. Исправьте его — флажки не изменили текст.")
+            warn(self, "MCP access", "Access JSON содержит ошибку. Исправьте его — флажки не изменили текст.")
             return
         self.access.setPlainText(json.dumps(self._access_from_checks(current), ensure_ascii=False, indent=2))
 

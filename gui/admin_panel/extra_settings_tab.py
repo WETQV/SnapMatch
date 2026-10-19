@@ -1,12 +1,13 @@
 # gui/admin_panel/extra_settings_tab.py
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QMessageBox, QScrollArea, QFrame
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QScrollArea, QFrame
 from PyQt6.QtCore import Qt
 
 from config.settings import settings_manager
 from gui.admin_panel.ui_common import field
 from gui.design import FxComboBox, SwitchRow, card, label, page_header, primary
 from gui.design.appearance import AppearanceCard
+from gui.design.dialogs import inform, warn
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -278,7 +279,7 @@ class ExtraSettingsTab(QWidget):
             except ValueError:
                 ctx_value = 0
             if ctx_value < 1024:
-                QMessageBox.warning(self, "Окно контекста", "Окно контекста должно быть целым числом не меньше 1024. Настройки не сохранены.")
+                warn(self, "Окно контекста", "Окно контекста должно быть целым числом не меньше 1024. Настройки не сохранены.")
                 return
         settings = settings_manager.get_settings()
         settings['chat_system_notifications'] = self.cb_sys_notify.isChecked()
@@ -313,8 +314,8 @@ class ExtraSettingsTab(QWidget):
             settings_manager.update_settings(**settings)
         except Exception as exc:
             logger.error("Не удалось сохранить дополнительные настройки: %s", exc)
-            QMessageBox.warning(self, "Ошибка", "Не удалось сохранить дополнительные настройки.")
+            warn(self, "Ошибка", "Не удалось сохранить дополнительные настройки.")
             return
         logger.info("Дополнительные настройки сохранены")
 
-        QMessageBox.information(self, "Сохранено", "Настройки сохранены и применены. Текущие процессы не прерваны.")
+        inform(self, "Сохранено", "Настройки сохранены и применены. Текущие процессы не прерваны.")

@@ -9,11 +9,12 @@
     frameless_changed(bool)  — пользователь включил/выключил собственную рамку окна.
 """
 import os
+import sys
 import re
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette
-from PyQt6.QtWidgets import QApplication, QColorDialog, QFrame, QHBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QWidget
 
 from gui.design import icons, motion
 from gui.design.tokens import ACCENT_PRESETS as PRESETS, BRAND_ACCENT, build_qss, make_tokens
@@ -26,7 +27,7 @@ from utils.resource_manager import get_resource_path
 
 logger = setup_logger(__name__)
 
-DEFAULTS = {"ui_theme": "dark", "ui_accent": "brand", "ui_frameless": False, "ui_animations": True}
+DEFAULTS = {"ui_theme": "dark", "ui_accent": "brand", "ui_frameless": sys.platform.startswith("linux"), "ui_animations": True}
 THEMES = (("system", "Системная"), ("dark", "Тёмная"), ("light", "Светлая"), ("oled", "OLED"))
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _REPAINT = (GlowRoot, StatusBadge, IconTile, ServerCard, WinButton, Switch, FxButton, ThemeCard, Swatch)
@@ -289,8 +290,9 @@ class AppearanceCard(QFrame):
         if key == "custom":
             start = self.ctrl.settings["ui_accent"]
             start = start if _HEX_RE.match(start) else self.ctrl.tokens.get("accent", BRAND_ACCENT)
-            color = QColorDialog.getColor(QColor(start), self, "Цвет акцента")
-            if not color.isValid():
+            from gui.design.dialogs import choose_color
+            color = choose_color(self, QColor(start), "Цвет акцента")
+            if color is None:
                 return
             key = color.name()
         self.ctrl.set_accent(key)

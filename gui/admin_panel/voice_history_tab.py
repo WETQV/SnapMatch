@@ -3,11 +3,12 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QPlainTextEdit, QSplitter, QMessageBox, QApplication,
+    QPlainTextEdit, QSplitter, QApplication,
 )
 from PyQt6.QtCore import Qt, QTimer
 
 from gui.async_worker import run_in_background
+from gui.design.dialogs import ask
 from gui.design import FxComboBox, StatusBadge, card, icon_button, label, make_table, page_header
 from utils.database.database_manager import DatabaseManager
 from utils.logger import setup_logger
@@ -208,9 +209,7 @@ class VoiceHistoryTab(QWidget):
         QApplication.clipboard().setText(self.details.toPlainText())
 
     def _confirm_clear(self):
-        answer = QMessageBox.question(
-            self, "Очистить историю", "Удалить всю историю расшифровок? Сообщения в чатах не затрагиваются.",
-        )
-        if answer == QMessageBox.StandardButton.Yes:
+        if ask(self, "Очистить историю", "Удалить всю историю расшифровок? Сообщения в чатах не затрагиваются.",
+               yes="Удалить", danger=True):
             self._signature = None
             run_in_background(_clear, on_done=lambda _: self.refresh(), on_error=self._on_error)

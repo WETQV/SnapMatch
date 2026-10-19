@@ -61,6 +61,7 @@ class FxTooltip(QWidget):
             y = global_pos.y() - self.height() - 12
         self.move(max(area.left() + 4, x), y)
         self.show()
+        self.raise_()      # поверх модальных диалогов (FxDialog) и их затемнения
         if motion.ENABLED:
             effect = QGraphicsOpacityEffect(self.panel)
             self.panel.setGraphicsEffect(effect)

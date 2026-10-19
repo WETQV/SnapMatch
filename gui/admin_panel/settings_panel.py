@@ -3,8 +3,8 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox, QHBoxLayout, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QDialog, QTextEdit, QApplication, QFrame,
-    QGridLayout, QListWidget, QListWidgetItem, QSplitter, QInputDialog, QSizePolicy,
+    QTableWidgetItem, QHeaderView, QDialog, QTextEdit, QApplication, QFrame,
+    QGridLayout, QListWidget, QListWidgetItem, QSplitter, QSizePolicy,
     QScrollArea, QSpinBox, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QTimer
@@ -17,6 +17,7 @@ from bot.handlers.queue_manager import (
     validate_system_prompt,
 )
 from bot.handlers.services.prompt_manager import build_system_prompt_status
+from gui.design.dialogs import FxDialog, SHADOW, ask, inform, warn, error, prompt_text
 from gui.design import (
     Collapsible, FxButton, FxComboBox, StatusBadge, Switch, SwitchRow,
     card, icon_button, label, page_header, primary,
@@ -61,7 +62,7 @@ class ModelsTable(QTableWidget):
         self.setColumnHidden(self.COL_URL, width < self.WIDTH_WITH_URL_ONLY)
 
 
-class ModelDialog(QDialog):
+class ModelDialog(FxDialog):
     REASONING_MODES = [
         ("Не управлять", "default"),
         ("Авто / adaptive", "auto"),
@@ -81,17 +82,14 @@ class ModelDialog(QDialog):
     ]
 
     def __init__(self, parent=None, existing_model=None):
-        super().__init__(parent)
-        self.setWindowTitle("Добавить/Редактировать модель")
-        self.setMinimumSize(620, 460)
-        self.resize(720, 680)
+        super().__init__(parent, "Добавить/Редактировать модель")
+        self.setMinimumSize(620 + 2 * SHADOW, 460 + 2 * SHADOW)
+        self.resize_content(720, 680)
         self.existing_model = existing_model
         self.init_ui()
         
     def init_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
-        outer.setSpacing(14)
+        outer = self.body
         outer.addLayout(page_header(
             "Редактирование модели" if self.existing_model else "Новая модель",
             "Подключение к API и поведение модели при распределении запросов",
@@ -359,7 +357,7 @@ class ModelDialog(QDialog):
 
 
 
-class PromptEditorDialog(QDialog):
+class PromptEditorDialog(FxDialog):
     HISTORY_LIMIT = 15
 
     def __init__(
@@ -375,7 +373,7 @@ class PromptEditorDialog(QDialog):
         title="Редактор System Prompt",
         show_defaults=True,
     ):
-        super().__init__(parent)
+        super().__init__(parent, title)
         self.panel = panel_adapter or parent
         self.original_prompt = prompt_text or ""
         self.placeholder_defaults = dict(placeholder_defaults or {})
@@ -390,16 +388,13 @@ class PromptEditorDialog(QDialog):
         self.placeholder_provider = placeholder_provider or get_available_placeholders
         self.show_defaults = bool(show_defaults)
 
-        self.setWindowTitle(title)
-        self.setMinimumSize(900, 660)
-        self.resize(1140, 700)
+        self.setMinimumSize(900 + 2 * SHADOW, 660 + 2 * SHADOW)
+        self.resize_content(1140, 700)
         self.init_ui()
         self._load_initial_state()
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(24, 20, 24, 20)
-        main_layout.setSpacing(14)
+        main_layout = self.body
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
 
@@ -538,14 +533,12 @@ class PromptEditorDialog(QDialog):
     def _confirm_discard_changes(self, action_text):
         if self.prompt_editor.toPlainText().rstrip() == (self._last_applied_prompt or "").rstrip():
             return True
-        reply = QMessageBox.question(
+        return ask(
             self,
             "Подтверждение",
             f"В редакторе есть несохранённые изменения. {action_text}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default="no",
         )
-        return reply == QMessageBox.StandardButton.Yes
 
 
     def copy_placeholder_item(self, item):
@@ -574,25 +567,24 @@ class PromptEditorDialog(QDialog):
         self.panel.show_prompt_validation_result(self.prompt_editor.toPlainText(), parent_widget=self)
 
     def save_template(self):
-        name, ok = QInputDialog.getText(self, "Новый шаблон", "Название шаблона:")
+        name, ok = prompt_text(self, "Новый шаблон", "Название шаблона:")
         if not ok:
             return
         name = name.strip()
         if not name:
-            QMessageBox.warning(self, "Шаблоны", "Название шаблона не может быть пустым.")
+            warn(self, "Шаблоны", "Название шаблона не может быть пустым.")
             return
 
         text = self.prompt_editor.toPlainText()
         for template in self.templates:
             if template.get("name") == name:
-                reply = QMessageBox.question(
+                if not ask(
                     self,
                     "Шаблоны",
                     "Шаблон с таким названием уже существует. Перезаписать?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
+                    yes="Перезаписать",
+                    danger=True,
+                ):
                     return
                 template["text"] = text
                 self._refresh_templates()
@@ -614,7 +606,7 @@ class PromptEditorDialog(QDialog):
     def load_selected_template(self):
         current_item = self.templates_list.currentItem()
         if not current_item:
-            QMessageBox.information(self, "Шаблоны", "Выберите шаблон для загрузки.")
+            inform(self, "Шаблоны", "Выберите шаблон для загрузки.")
             return
         if not self._confirm_discard_changes("Загрузить шаблон поверх текущего текста"):
             return
@@ -624,17 +616,16 @@ class PromptEditorDialog(QDialog):
     def delete_selected_template(self):
         current_item = self.templates_list.currentItem()
         if not current_item:
-            QMessageBox.information(self, "Шаблоны", "Выберите шаблон для удаления.")
+            inform(self, "Шаблоны", "Выберите шаблон для удаления.")
             return
         template = current_item.data(Qt.ItemDataRole.UserRole) or {}
-        reply = QMessageBox.question(
+        if not ask(
             self,
             "Шаблоны",
             f"Удалить шаблон '{template.get('name', 'Без имени')}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+            yes="Удалить",
+            danger=True,
+        ):
             return
         # Удаляем только выбранный шаблон, а не все с таким же именем
         row = self.templates_list.row(current_item)
@@ -1062,7 +1053,7 @@ class SettingsPanel(QWidget):
             dialog.exec()
         except Exception as e:
             logger.error(f"Ошибка открытия редактора промпта: {e}")
-            QMessageBox.warning(self, "Ошибка", "Не удалось открыть редактор System Prompt.")
+            warn(self, "Ошибка", "Не удалось открыть редактор System Prompt.")
 
     def open_placeholders_dialog(self):
         self.open_system_prompt_editor()
@@ -1110,12 +1101,12 @@ class SettingsPanel(QWidget):
         try:
             is_valid, message = self.build_prompt_validation_result(prompt)
             if is_valid:
-                QMessageBox.information(parent_widget, "Проверка", message)
+                inform(parent_widget, "Проверка", message)
             else:
-                QMessageBox.warning(parent_widget, "Проверка", message)
+                warn(parent_widget, "Проверка", message)
         except Exception as e:
             logger.error(f"Ошибка при проверке промпта: {e}")
-            QMessageBox.warning(parent_widget, "Ошибка", "Не удалось проверить промпт")
+            warn(parent_widget, "Ошибка", "Не удалось проверить промпт")
 
     def validate_system_prompt(self):
         """Проверить системный промпт на ошибки и оценить токены"""
@@ -1352,15 +1343,13 @@ class SettingsPanel(QWidget):
         model_id = model_to_delete.get('id', 'Unknown')
         
         # Подтверждение удаления
-        reply = QMessageBox.question(
-            self, 
-            'Подтверждение удаления', 
+        if ask(
+            self,
+            'Подтверждение удаления',
             f"Вы уверены, что хотите удалить модель '{model_id}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
+            yes="Удалить",
+            danger=True,
+        ):
             # Используем ModelService для удаления
             success, message = ModelService.delete_model(current_row)
             
@@ -1454,7 +1443,7 @@ class SettingsPanel(QWidget):
             self.show_error(f"Ошибка при сохранении настроек: {e}")
 
     def show_error(self, message):
-        QMessageBox.critical(self, "Ошибка", message)
+        error(self, "Ошибка", message)
 
     def show_message(self, message):
         """Сообщение об успехе: всплывающее уведомление окна (если оно есть), иначе обычный диалог."""
@@ -1463,4 +1452,4 @@ class SettingsPanel(QWidget):
         if toast is not None and window.isVisible():
             toast.show_message(message, hold_ms=3500)
         else:
-            QMessageBox.information(self, "Информация", message)
+            inform(self, "Информация", message)

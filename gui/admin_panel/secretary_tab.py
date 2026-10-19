@@ -4,10 +4,8 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
@@ -25,6 +23,7 @@ from bot.handlers.services.prompt_manager import (
     validate_system_prompt,
 )
 from gui.admin_panel.settings_panel import PromptEditorDialog
+from gui.design.dialogs import ask, inform, prompt_text, warn
 from gui.design import (
     Collapsible,
     FxButton,
@@ -557,13 +556,13 @@ class SecretaryTab(QWidget):
         self.blocked_chats.setPlainText(profile.get("blocked_chats") or "")
 
     def add_profile(self):
-        owner_id, ok = QInputDialog.getText(self, "Добавить владельца", "Telegram ID владельца:")
+        owner_id, ok = prompt_text(self, "Добавить владельца", "Telegram ID владельца:")
         if not ok:
             return
         try:
             owner_id_int = int(owner_id.strip())
         except ValueError:
-            QMessageBox.warning(self, "Ошибка", "Telegram ID должен быть числом.")
+            warn(self, "Ошибка", "Telegram ID должен быть числом.")
             return
         db = DatabaseManager()
         try:
@@ -599,7 +598,7 @@ class SecretaryTab(QWidget):
 
     def open_secretary_prompt_editor(self):
         if self.current_owner_id is None:
-            QMessageBox.warning(self, "Ошибка", "Сначала выберите владельца.")
+            warn(self, "Ошибка", "Сначала выберите владельца.")
             return
         try:
             dialog = PromptEditorDialog(
@@ -616,7 +615,7 @@ class SecretaryTab(QWidget):
             dialog.exec()
         except Exception as exc:
             logger.error("Не удалось открыть редактор secretary prompt: %s", exc)
-            QMessageBox.warning(self, "Ошибка", "Не удалось открыть редактор secretary prompt.")
+            warn(self, "Ошибка", "Не удалось открыть редактор secretary prompt.")
 
     def validate_secretary_prompt(self):
         self.show_prompt_validation_result(self.prompt.toPlainText())
@@ -627,7 +626,7 @@ class SecretaryTab(QWidget):
             message = "Промпт выглядит корректно."
             if recommendations:
                 message += "\n\nРекомендации:\n- " + "\n- ".join(recommendations)
-            QMessageBox.information(parent_widget or self, "Проверка", message)
+            inform(parent_widget or self, "Проверка", message)
             return
 
         parts = []
@@ -635,7 +634,7 @@ class SecretaryTab(QWidget):
             parts.append("Предупреждения:\n- " + "\n- ".join(warnings))
         if recommendations:
             parts.append("Рекомендации:\n- " + "\n- ".join(recommendations))
-        QMessageBox.warning(parent_widget or self, "Проверка", "\n\n".join(parts) or "Промпт требует внимания.")
+        warn(parent_widget or self, "Проверка", "\n\n".join(parts) or "Промпт требует внимания.")
 
     def append_prompt_history(self, history, prompt_text):
         text = (prompt_text or "").rstrip()
@@ -702,7 +701,7 @@ class SecretaryTab(QWidget):
             try:
                 kind(str(text).strip().replace(",", ".") if kind is float else str(text).strip())
             except (TypeError, ValueError):
-                QMessageBox.warning(self, "Некорректное значение", f"Поле «{label}»: «{text}» не является числом. Профиль не сохранён.")
+                warn(self, "Некорректное значение", f"Поле «{label}»: «{text}» не является числом. Профиль не сохранён.")
                 return False
         return True
 
@@ -777,14 +776,7 @@ class SecretaryTab(QWidget):
     def delete_profile(self):
         if self.current_owner_id is None:
             return
-        reply = QMessageBox.question(
-            self,
-            "Удалить владельца",
-            f"Удалить secretary-профиль владельца {self.current_owner_id}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not ask(self, "Удалить владельца", f"Удалить secretary-профиль владельца {self.current_owner_id}?", yes="Удалить", danger=True):
             return
         db = DatabaseManager()
         try:
@@ -906,12 +898,12 @@ class SecretaryTab(QWidget):
 
     def _read_chat_id(self):
         if self.current_owner_id is None:
-            QMessageBox.warning(self, "Ошибка", "Сначала выберите владельца.")
+            warn(self, "Ошибка", "Сначала выберите владельца.")
             return None
         try:
             return int(self._chat_id_text())
         except ValueError:
-            QMessageBox.warning(self, "Ошибка", "chat_id должен быть числом.")
+            warn(self, "Ошибка", "chat_id должен быть числом.")
             return None
 
     def load_chat_override(self):
@@ -942,7 +934,7 @@ class SecretaryTab(QWidget):
         self.chat_media_stt.setCurrentText("inherit" if media_stt is None else ("on" if media_stt else "off"))
         media_images = settings.get("media_images_enabled")
         self.chat_media_images.setCurrentText("inherit" if media_images is None else ("on" if media_images else "off"))
-        QMessageBox.information(self, "Готово", "Настройки чата загружены.")
+        inform(self, "Готово", "Настройки чата загружены.")
 
     def save_chat_override(self):
         chat_id = self._read_chat_id()
@@ -953,7 +945,7 @@ class SecretaryTab(QWidget):
             try:
                 int(ttl_text)
             except ValueError:
-                QMessageBox.warning(self, "Некорректное значение", f"TTL чата: «{ttl_text}» не является целым числом. Настройки чата не сохранены.")
+                warn(self, "Некорректное значение", f"TTL чата: «{ttl_text}» не является целым числом. Настройки чата не сохранены.")
                 return
         ttl_value = self._parse_positive_int(ttl_text, default=3600, minimum=0) if ttl_text else None
         prompt_text = self.chat_prompt.toPlainText().strip()
@@ -976,7 +968,7 @@ class SecretaryTab(QWidget):
             db.secretary.add_event(self.current_owner_id, "updated", f"chat override saved chat_id={chat_id}", chat_id=chat_id)
         finally:
             db.close()
-        QMessageBox.information(self, "Сохранено", "Настройки чата сохранены.")
+        inform(self, "Сохранено", "Настройки чата сохранены.")
 
     def clear_chat_override(self):
         self._reset_chat_override_form()
@@ -985,14 +977,7 @@ class SecretaryTab(QWidget):
         chat_id = self._read_chat_id()
         if chat_id is None:
             return
-        reply = QMessageBox.question(
-            self,
-            "Очистить историю",
-            f"Удалить secretary-историю chat_id={chat_id} и закрыть активную сессию этого чата?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not ask(self, "Очистить историю", f"Удалить secretary-историю chat_id={chat_id} и закрыть активную сессию этого чата?", yes="Удалить", danger=True):
             return
         db = DatabaseManager()
         try:
@@ -1024,7 +1009,7 @@ class SecretaryTab(QWidget):
         self._chat_message_counts[chat_id] = 0
         self._set_chat_history_count(0)
         self.events.setPlainText(self._format_events(events))
-        QMessageBox.information(self, "Готово", f"Удалено сообщений: {deleted_count}.")
+        inform(self, "Готово", f"Удалено сообщений: {deleted_count}.")
 
     @staticmethod
     def _user_display_name(user):

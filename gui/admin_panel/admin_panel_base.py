@@ -1,10 +1,10 @@
 # gui/admin_panel/admin_panel_base.py
 
 from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
+    QApplication, QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
     QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import QSize, QTimer
+from PyQt6.QtCore import QSize, Qt, QTimer
 from gui.admin_panel.user_management import UserManagement
 from gui.admin_panel.settings_panel import SettingsPanel  # Импортируем ваш реальный SettingsPanel
 from gui.admin_panel.voice_settings_tab import VoiceSettingsTab
@@ -13,7 +13,8 @@ from gui.admin_panel.extra_settings_tab import ExtraSettingsTab
 from gui.admin_panel.mcp_tab import McpTab
 from gui.admin_panel.secretary_tab import SecretaryTab
 from gui.design import appearance, icons, motion
-from gui.design.shell import FrameController, TitleBar, prepare_translucent
+from gui.design.dialogs import ask, warn
+from gui.design.shell import BRAND_GREEN, BRAND_RED, FrameController, TitleBar, logo_label, prepare_translucent
 from gui.design.widgets import GlowRoot, label
 from gui.splash_screen import APP_VERSION
 from bot.handlers.services.mcp_runtime import stop_all_server_processes
@@ -65,7 +66,16 @@ class AdminPanelBase(QMainWindow):
         side.setFixedWidth(SIDEBAR_WIDTH)
         sl = QVBoxLayout(side)
         sl.setContentsMargins(14, 18, 14, 14)
-        sl.addWidget(label("SnapMatch", "brand"))
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(6, 0, 0, 6)
+        brand_row.setSpacing(10)
+        brand_row.addWidget(logo_label(32))
+        brand = label("", "brand")
+        brand.setTextFormat(Qt.TextFormat.RichText)
+        brand.setText(f'<span style="color:{BRAND_GREEN}">Snap</span><span style="color:{BRAND_RED}">Match</span>')
+        brand_row.addWidget(brand)
+        brand_row.addStretch()
+        sl.addLayout(brand_row)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         self.nav.setIconSize(QSize(20, 20))
@@ -148,6 +158,7 @@ class AdminPanelBase(QMainWindow):
     def _on_nav(self, row: int) -> None:
         if row >= 0:
             self.pages.setCurrentIndex(row)
+            self.titlebar.set_title(self.nav.item(row).text())
             self._move_indicator()
 
     def _move_indicator(self, animate: bool = True) -> None:
@@ -266,7 +277,7 @@ class AdminPanelBase(QMainWindow):
             logger.warning(f"Настройки невалидны - перезапуск отменен. Ошибки: {', '.join(errors)}")
             
             # Показываем сообщение пользователю
-            QMessageBox.warning(
+            warn(
                 self,
                 "Невалидные настройки",
                 f"Не удается запустить бота:\n\n" + "\n".join(f"• {error}" for error in errors)
@@ -281,7 +292,7 @@ class AdminPanelBase(QMainWindow):
             logger.info("Останавливаем текущий бот...")
             if not self.bot_thread.stop_and_wait(15000):
                 logger.warning("Smart restart cancelled because previous BotThread is still running.")
-                QMessageBox.warning(
+                warn(
                     self,
                     "Перезапуск отменен",
                     "Не удалось корректно остановить текущий сеанс бота. Попробуйте закрыть приложение и запустить его снова."
@@ -324,33 +335,22 @@ class AdminPanelBase(QMainWindow):
             return
 
         if server_state.server_active:
-            reply = QMessageBox.question(
-                self, 'Выход',
-                'Сохранить статистику текущего сеанса перед выходом?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
+            save_stats = ask(self, 'Выход', 'Сохранить статистику текущего сеанса перед выходом?',
+                             yes="Сохранить", no="Не сохранять", default="no")
 
             self._closing = True
-            if reply == QMessageBox.StandardButton.Yes:
+            if save_stats:
                 try:
                     self.user_management.save_session_statistics()
                 except Exception as e:
                     logger.error(f"Ошибка при сохранении статистики сеанса: {e}")
-                    QMessageBox.warning(
+                    warn(
                         self,
                         "Ошибка",
                         "Не удалось сохранить статистику сеанса."
                     )
         else:
-            reply = QMessageBox.question(
-                self, 'Выход',
-                'Вы действительно хотите выйти?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-
-            if reply != QMessageBox.StandardButton.Yes:
+            if not ask(self, 'Выход', 'Вы действительно хотите выйти?', yes="Выйти", no="Остаться", default="no"):
                 self._closing = False
                 event.ignore()
                 return
@@ -359,7 +359,7 @@ class AdminPanelBase(QMainWindow):
         if not self._shutdown_runtime():
             self._closing = False
             event.ignore()
-            QMessageBox.warning(
+            warn(
                 self,
                 "Завершение работы",
                 "Фоновые операции ещё завершаются. Подождите немного и закройте приложение повторно.",

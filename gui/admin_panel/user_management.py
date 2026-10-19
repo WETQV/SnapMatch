@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QDialog, QTableWidgetItem,
-    QTextEdit, QHeaderView, QAbstractItemView, QMessageBox, QSpinBox, QSplitter,
+    QTextEdit, QHeaderView, QAbstractItemView, QSpinBox, QSplitter,
     QStackedWidget, QApplication, QSizePolicy,
 )
 from PyQt6.QtCore import QTimer, Qt, QEvent
@@ -18,6 +18,7 @@ from gui.design import (
     FxButton, FxComboBox, SegmentedControl, StatTile, StatusBadge, SwitchRow,
     card, current_tokens, icon_button, icons, label, make_table, page_header, primary,
 )
+from gui.design.dialogs import FxDialog, ask, inform, warn
 
 # Убран статический импорт для избежания циклического импорта
 # Импорт делается внутри функции update_message_history()
@@ -681,7 +682,7 @@ class UserManagement(QWidget):
                 error_msg = "Не удается запустить сервер. Проблемы с настройками:\n\n" + "\n".join(f"• {error}" for error in errors)
                 error_msg += "\n\nПерейдите на вкладку 'Настройки' для исправления проблем."
                 
-                QMessageBox.warning(self, "Невалидные настройки", error_msg)
+                warn(self, "Невалидные настройки", error_msg)
                 logger.warning(f"Запуск сервера отменен - невалидные настройки: {', '.join(errors)}")
                 
                 # Возвращаем кнопку в исходное состояние
@@ -844,13 +845,11 @@ class UserManagement(QWidget):
             online_users = self.user_service.count_online_users()
             data = self.stats_service.get_all_current_stats()
 
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Статистика")
-            dialog.setMinimumSize(760, 480)
-            dialog.resize(880, 540)
+            dialog = FxDialog(self, "Статистика")
+            dialog.setMinimumSize(760 + 40, 480 + 40)
+            dialog.resize_content(880, 540)
 
-            main_layout = QVBoxLayout(dialog)
-            main_layout.setContentsMargins(24, 20, 24, 20)
+            main_layout = dialog.body
             main_layout.setSpacing(14)
             main_layout.addLayout(page_header("Статистика", "Счётчики текущего сеанса и история прошлых запусков"))
 
@@ -935,7 +934,7 @@ class UserManagement(QWidget):
 
         except Exception as e:
             logger.error(f"Ошибка отображения полной статистики: {e}")
-            QMessageBox.warning(self, "Ошибка", f"Не удалось показать статистику: {e}")
+            warn(self, "Ошибка", f"Не удалось показать статистику: {e}")
 
     # ───────────────────────── статус сервера ─────────────────────────
     def _steady_status_text(self) -> str:
@@ -968,7 +967,7 @@ class UserManagement(QWidget):
             file_path = self.stats_service.get_session_stats_path()
             
             if not file_path.exists():
-                QMessageBox.information(
+                inform(
                     self,
                     "Файл не найден",
                     "Файл session_stats.txt ещё не создан.\n"
@@ -979,25 +978,24 @@ class UserManagement(QWidget):
             
             # Системный редактор по умолчанию: Windows, Linux (xdg-open) и macOS
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path.resolve()))):
-                QMessageBox.warning(
+                warn(
                     self,
                     "Не удалось открыть файл",
                     f"В системе не найдено приложение для .txt.\n\nФайл лежит здесь:\n{file_path}",
                 )
         except Exception as e:
             logger.error(f"Ошибка при открытии файла статистики: {e}")
-            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть файл: {e}")
+            warn(self, "Ошибка", f"Не удалось открыть файл: {e}")
 
     def _reset_session_stats(self, dialog: QDialog):
         """Сбрасывает статистику текущего сеанса (с подтверждением)."""
-        reply = QMessageBox.question(
+        if ask(
             dialog,
             "Сброс статистики",
             "Сбросить счётчики текущего сеанса?\n\nИстория предыдущих сеансов не будет затронута.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+            yes="Сбросить",
+            danger=True,
+        ):
             self.stats_service.reset()
             dialog.close()
             self.update_stats()
