@@ -1,2 +1,4 @@
 -r requirements.txt
+# Пакет: https://pypi.org/project/vosk/
+# Модели: https://alphacephei.com/vosk/models
 vosk
