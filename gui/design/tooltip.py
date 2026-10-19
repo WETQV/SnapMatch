@@ -81,6 +81,14 @@ class TooltipManager(QObject):
         super().__init__(app)
         self.tip = FxTooltip()
         app.installEventFilter(self)
+        # при выходе снимаем фильтр: иначе он вызывается во время уничтожения виджетов и может уронить процесс
+        app.aboutToQuit.connect(self._shutdown)
+
+    def _shutdown(self) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self.tip.close()
 
     def eventFilter(self, obj, event):  # noqa: N802
         try:

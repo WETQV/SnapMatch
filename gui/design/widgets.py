@@ -906,6 +906,52 @@ class Collapsible(QWidget):
 
 
 # ───────────────────────── помощники сборки страниц ─────────────────────────
+class Reveal(QWidget):
+    """Плавно показывает и скрывает блок (например, панель «несохранённые изменения»).
+    Анимируется ВЫСОТА контейнера, содержимое сохраняет натуральный размер и выезжает из-под края;
+    позиции в раскладке не анимируются — наложений нет."""
+
+    def __init__(self, content: QWidget) -> None:
+        super().__init__()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.body = _ClipBody(content)
+        lay.addWidget(self.body)
+        self.body.setFixedHeight(0)
+        self.body.setVisible(False)
+        self._open = False
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(220)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.valueChanged.connect(lambda v: self.body.setFixedHeight(int(v)))
+
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, open_: bool) -> None:
+        if open_ == self._open:
+            return
+        self._open = open_
+        self._anim.stop()
+        try:
+            self._anim.finished.disconnect()
+        except TypeError:
+            pass
+        target = self.body.measure() if open_ else 0
+        if open_:
+            self.body.setVisible(True)
+            self.body.content.setGeometry(0, 0, self.body.width(), self.body.natural)
+        if not motion.ENABLED:
+            self.body.setFixedHeight(target)
+            self.body.setVisible(open_)
+            return
+        self._anim.setStartValue(self.body.height())
+        self._anim.setEndValue(target)
+        if not open_:
+            self._anim.finished.connect(lambda: self.body.setVisible(False))
+        self._anim.start()
+
+
 from PyQt6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem  # noqa: E402
 
 

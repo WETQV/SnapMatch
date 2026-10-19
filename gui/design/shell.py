@@ -81,6 +81,7 @@ class FrameController(QObject):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+            app.aboutToQuit.connect(lambda: app.removeEventFilter(self))   # безопасное завершение
 
     # ── включение/выключение ──
     def set_frameless(self, on: bool) -> None:

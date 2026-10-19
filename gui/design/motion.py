@@ -34,30 +34,35 @@ def _opacity(widget: QWidget) -> QGraphicsOpacityEffect:
     return effect
 
 
-def fade_in(widget: QWidget, rise: int = 10, delay: int = 0, duration: int = ENTER_MS) -> None:
-    """Плавное появление с небольшим подъёмом. Эффект снимается после завершения."""
+def fade_in(widget: QWidget, rise: int = 0, delay: int = 0, duration: int = ENTER_MS) -> None:
+    """Плавное появление (только прозрачность). Позицией виджетов в раскладке управляет сама раскладка —
+    анимировать её нельзя, получаются наложения. Повторный вызов безопасно останавливает прошлую анимацию."""
     if not ENABLED:
         return
-    effect = _opacity(widget)
+    old = getattr(widget, "_anim_ref", None)
+    if old is not None:
+        old.stop()
+    effect = widget.graphicsEffect()
+    if not isinstance(effect, QGraphicsOpacityEffect):
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
     effect.setOpacity(0.0)
     fade = QPropertyAnimation(effect, b"opacity", widget)
     fade.setDuration(duration)
     fade.setStartValue(0.0)
     fade.setEndValue(1.0)
     fade.setEasingCurve(QEasingCurve.Type.OutCubic)
-    base = widget.pos()
-    move = QPropertyAnimation(widget, b"pos", widget)
-    move.setDuration(duration)
-    move.setStartValue(base + QPoint(0, rise))
-    move.setEndValue(base)
-    move.setEasingCurve(QEasingCurve.Type.OutCubic)
-    group = QParallelAnimationGroup(widget)
-    group.addAnimation(fade)
-    group.addAnimation(move)
-    group.finished.connect(lambda: widget.setGraphicsEffect(None))
-    QTimer.singleShot(delay, group.start)
-    # держим ссылку, чтобы группу не собрал GC до старта
-    widget._anim_ref = group  # type: ignore[attr-defined]
+
+    def done() -> None:
+        if getattr(widget, "_anim_ref", None) is fade and widget.graphicsEffect() is effect:
+            widget.setGraphicsEffect(None)
+
+    fade.finished.connect(done)
+    timer = QTimer(widget)           # дочерний таймер: умрёт вместе с виджетом
+    timer.setSingleShot(True)
+    timer.timeout.connect(fade.start)
+    timer.start(max(0, delay))
+    widget._anim_ref = fade          # type: ignore[attr-defined]
 
 
 class FadeStack(QStackedWidget):
@@ -107,22 +112,23 @@ class Toast(QLabel):
         self.setText(text)
         self.adjustSize()
         parent = self.parentWidget()
-        x = parent.width() - self.width() - 28
-        y = parent.height() - self.height() - 28
+        left = getattr(parent, "sidebar_w", 0)
+        x = left + (parent.width() - left - self.width()) // 2
+        y = getattr(parent, "top_offset", 0) + 16     # сверху по центру: не перекрывает кнопки действий
         self.move(x, y)
         self.show()
         self.raise_()
         if not ENABLED:
             self._effect.setOpacity(1.0)
         else:
-            self._run(0.0, 1.0, ENTER_MS, QPoint(x, y + 14), QPoint(x, y))
+            self._run(0.0, 1.0, ENTER_MS, QPoint(x, y - 14), QPoint(x, y))
         self._hide_timer.start(hold_ms)
 
     def _fade_out(self) -> None:
         if not ENABLED:
             self.hide()
             return
-        self._run(1.0, 0.0, EXIT_MS, self.pos(), self.pos() + QPoint(0, 8), hide_after=True)
+        self._run(1.0, 0.0, EXIT_MS, self.pos(), self.pos() + QPoint(0, -8), hide_after=True)
 
     def _run(self, a: float, b: float, ms: int, p0: QPoint, p1: QPoint, hide_after: bool = False) -> None:
         fade = QPropertyAnimation(self._effect, b"opacity", self)

@@ -14,7 +14,7 @@ from gui.design.tokens import BRAND_ACCENT, FONT_MONO, FONT_UI, RADIUS, build_qs
 from gui.design.tokens import tokens as current_tokens   # не называем tokens: имя занято модулем gui.design.tokens
 from gui.design.tooltip import FxTooltip, TooltipManager
 from gui.design.widgets import (
-    Collapsible, FxButton, FxComboBox, FxSlider, GlowRoot, IconTile, ServerCard, StatTile, StatusBadge, Swatch,
+    Collapsible, Reveal, FxButton, FxComboBox, FxSlider, GlowRoot, IconTile, ServerCard, StatTile, StatusBadge, Swatch,
     Switch, SwitchRow, ThemeCard, WinButton, card, icon_button, label, make_table, page_header, primary,
     refresh_icons,
 )
@@ -24,7 +24,7 @@ __all__ = [
     "AppearanceCard", "AppearanceController", "controller", "init_appearance", "load_fonts",
     "FadeStack", "NavIndicator", "SegmentedControl", "Toast", "fade_in",
     "FrameController", "TitleBar", "prepare_translucent", "FxTooltip", "TooltipManager",
-    "Collapsible", "FxButton", "FxComboBox", "FxSlider", "GlowRoot", "IconTile", "ServerCard", "StatTile",
+    "Collapsible", "Reveal", "FxButton", "FxComboBox", "FxSlider", "GlowRoot", "IconTile", "ServerCard", "StatTile",
     "StatusBadge", "Swatch", "Switch", "SwitchRow", "ThemeCard", "WinButton",
     "card", "icon_button", "label", "make_table", "page_header", "primary", "refresh_icons",
 ]
