@@ -246,6 +246,26 @@ class StatusBadge(QWidget):
         if motion.ENABLED and self.isVisible():
             self.update()
 
+    def set(self, text: str, kind: str | None = None) -> None:
+        """Меняет текст и вид бейджа без пересоздания (пульсация включается только для kind='ok')."""
+        self.text = text
+        if kind is not None and kind != self.kind:
+            self.kind = kind
+            if kind == "ok" and self._anim is None:
+                self._anim = QVariantAnimation(self)
+                self._anim.setStartValue(0.0)
+                self._anim.setEndValue(math.tau)
+                self._anim.setDuration(2400)
+                self._anim.setLoopCount(-1)
+                self._anim.valueChanged.connect(self._on_tick)
+                self._anim.start()
+            elif kind != "ok" and self._anim is not None:
+                self._anim.stop()
+                self._anim.deleteLater()
+                self._anim = None
+        self.updateGeometry()
+        self.update()
+
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(QFontMetrics(self._font).horizontalAdvance(self.text) + 36, 24)
 
@@ -396,6 +416,12 @@ class StatTile(QFrame):
         self._count.setDuration(650)
         self._count.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._count.valueChanged.connect(lambda v: self.num.setText(str(int(v))))
+
+    def set_value(self, value: str) -> None:
+        """Обновляет значение плитки (с анимацией счёта, если значение целое и анимации включены)."""
+        self._text = value
+        self._target = int(value) if value.isdigit() else None
+        self.num.setText(value)
 
     def play(self, delay_ms: int = 0) -> None:
         """Запускает счёт от нуля до значения (вызывается при показе страницы)."""
@@ -657,7 +683,11 @@ class ThemeCard(QWidget):
         super().__init__()
         self.key, self.title, self.pt = key, title, preview_tokens
         self.selected = False
-        self.setFixedSize(150, 112)
+        # ширина подстраивается под окно (миниатюра рисуется по текущей ширине), высота фиксирована
+        self.setMinimumWidth(126)
+        self.setMaximumWidth(176)
+        self.setFixedHeight(112)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hover = Progress(self, 130)
         self._sel = Progress(self, 190)
@@ -717,7 +747,7 @@ class ThemeCard(QWidget):
         f.setWeight(QFont.Weight.DemiBold)
         p.setFont(f)
         p.setPen(QColor(t["accent"] if self.selected else t["text"]))
-        p.drawText(QRectF(12, 78, self.width() - 40, 28), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.title)
+        p.drawText(QRectF(12, 78, self.width() - 38, 28), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.title)
         if s > 0.01:
             p.setOpacity(s)
             p.setPen(Qt.PenStyle.NoPen)

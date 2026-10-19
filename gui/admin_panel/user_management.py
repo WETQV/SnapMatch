@@ -259,7 +259,7 @@ class UserManagement(QWidget):
         left_lay.addWidget(self.entities_switch)
 
         self.users_table = self._make_entity_table(
-            ['Имя пользователя', 'Telegram ID', 'Приоритет', 'Статус', 'Действия'])
+            ['Пользователь', 'Telegram ID', 'Приоритет', 'Статус', 'Действия'])
         self.groups_table = self._make_entity_table(
             ['Название чата', 'Chat ID', 'Сообщений', 'Статус', 'Действия'])
 

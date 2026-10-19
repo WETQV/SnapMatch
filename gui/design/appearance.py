@@ -240,7 +240,7 @@ class AppearanceCard(QFrame):
             tc.clicked.connect(self._pick_theme)
             row.addWidget(tc)
             self.theme_cards[key] = tc
-        row.addStretch()
+        row.addStretch(1)
         lay.addLayout(row)
 
         lay.addWidget(label("АКЦЕНТНЫЙ ЦВЕТ", "sectionLabel"))

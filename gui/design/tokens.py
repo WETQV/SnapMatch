@@ -162,7 +162,7 @@ QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit, QDateTimeEdit {{ padding: 6px 8p
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QPlainTextEdit:hover, QTextEdit:hover {{ border-color: {t['text_muted']}; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {acc}; }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QPlainTextEdit:disabled, QTextEdit:disabled {{ color: {t['text_muted']}; }}
-QLineEdit#mono, QPlainTextEdit#mono {{ font-family: {FONT_MONO}; font-size: 12px; }}
+QLineEdit#mono, QPlainTextEdit#mono, QTextEdit#mono {{ font-family: {FONT_MONO}; font-size: 12px; }}
 QSpinBox::up-button, QDoubleSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: border; width: 20px; border: none; background: transparent;
 }}
@@ -226,6 +226,7 @@ QTableWidget, QTableView {{
     selection-background-color: {row_sel}; selection-color: {t['text']};
 }}
 QTableWidget::item {{ padding: 6px 10px; border: none; }}
+QTableWidget#compact::item {{ padding: 0 6px; }}
 QTableWidget::item:hover {{ background: {t['hover_fill']}; }}
 QTableWidget::item:selected {{ background: {row_sel}; color: {t['text']}; }}
 QHeaderView {{ background: transparent; }}
@@ -266,6 +267,7 @@ QProgressBar#busy {{ background: {t['border']}; border: none; border-radius: 1px
 QProgressBar#busy::chunk {{ background: {acc}; border-radius: 1px; }}
 QToolButton#collapseToggle {{ background: transparent; border: none; color: {t['text']}; font-weight: 700; padding: 4px 0; }}
 QLabel#fieldError {{ color: {t['danger']}; font-size: 12px; }}
+QLabel#fieldWarn {{ color: {t['warning']}; font-size: 12px; }}
 QToolTip {{ background: {t['surface_alt']}; color: {t['text']}; border: 1px solid {t['border']}; padding: 5px 9px; }}
 QFrame#tipPanel {{ background: {t['surface_alt']}; border: 1px solid {t['border']}; border-radius: {r - 2}px; }}
 QLabel#tipTitle {{ font-weight: 700; font-size: 12px; }}
