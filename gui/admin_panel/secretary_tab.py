@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from PyQt6.QtCore import Qt
+from contextlib import contextmanager
 from datetime import datetime
 
 from bot.handlers.services.prompt_manager import (
@@ -82,6 +83,8 @@ class SecretaryTab(QWidget):
         self._chat_message_counts = {}
         self._loading = False       # идёт заполнение полей из БД: правки не считаются изменениями пользователя
         self._dirty = False
+        self._owner_dirty = False   # правки полей владельца
+        self._chat_dirty = False    # правки формы «Настройки отдельных чатов»
         self._side_layout = None
         self._init_ui()
         self._init_tooltips()
@@ -368,14 +371,40 @@ class SecretaryTab(QWidget):
 
     # ── Панель «есть несохранённые изменения» ──
 
-    def _set_dirty(self, dirty: bool) -> None:
-        self._dirty = bool(dirty)
+    def _apply_dirty(self) -> None:
+        self._dirty = self._owner_dirty or self._chat_dirty
         self.save_reveal.set_open(self._dirty)
+
+    def _set_dirty(self, dirty: bool) -> None:
+        """True — правки владельца; False — полный сброс (владелец и форма чата сохранены/загружены заново)."""
+        self._owner_dirty = bool(dirty)
+        if not dirty:
+            self._chat_dirty = False
+        self._apply_dirty()
+
+    def _set_chat_dirty(self, dirty: bool) -> None:
+        self._chat_dirty = bool(dirty)
+        self._apply_dirty()
 
     def _mark_dirty(self, *_args) -> None:
         if self._loading:
             return
         self._set_dirty(True)
+
+    def _mark_chat_dirty(self, *_args) -> None:
+        if self._loading:
+            return
+        self._set_chat_dirty(True)
+
+    @contextmanager
+    def _loading_fields(self):
+        """Программное заполнение полей: правки не считаются изменениями пользователя."""
+        was = self._loading
+        self._loading = True
+        try:
+            yield
+        finally:
+            self._loading = was
 
     def _connect_dirty_tracking(self) -> None:
         """Любая правка поля владельца показывает панель «Сохранить / Отменить» (stateChanged у SwitchRow нет — toggled)."""
@@ -390,15 +419,22 @@ class SecretaryTab(QWidget):
             line.textChanged.connect(self._mark_dirty)
         for edit in (self.prompt, self.allowed_chats, self.blocked_chats):
             edit.textChanged.connect(self._mark_dirty)
+        # Форма «Настройки отдельных чатов»: все редактируемые поля (виджеты создаются один раз и переиспользуются)
+        for combo in (
+            self.chat_response_mode, self.chat_history, self.chat_close_after_reply,
+            self.chat_turn_based_replies, self.chat_owner_behavior, self.chat_media_stt, self.chat_media_images,
+        ):
+            combo.currentIndexChanged.connect(self._mark_chat_dirty)
+        self.chat_ttl.textChanged.connect(self._mark_chat_dirty)
+        for edit in (self.chat_prompt, self.chat_allowed_mcp):
+            edit.textChanged.connect(self._mark_chat_dirty)
 
     def discard_changes(self) -> None:
         """Возвращает поля владельца к сохранённым значениям; несохранённая форма чата остаётся."""
         if self.current_owner_id is None:
             self._set_dirty(False)
             return
-        chat_state = self._capture_chat_form()
-        self._on_selection_changed()
-        self._restore_chat_form(chat_state)
+        self._on_selection_changed()   # перечитывает владельца и сбрасывает форму чата
 
     def _init_tooltips(self):
         _tip(self.add_button, "Добавить владельца", "Добавить владельца, который сможет использовать бота как личного секретаря.")
@@ -522,13 +558,10 @@ class SecretaryTab(QWidget):
             prompt_templates = db.secretary.list_prompt_templates(self.current_owner_id)
         finally:
             db.close()
-        self._loading = True
-        try:
+        with self._loading_fields():
             self._fill_profile_fields(profile, prompt_history, prompt_templates)
-        finally:
-            self._loading = False
-        self._refresh_chat_options(recent_chats)
-        self._reset_chat_override_form()
+            self._refresh_chat_options(recent_chats)
+            self._reset_chat_override_form()
         self.events.setPlainText(self._format_events(events))
         self._set_dirty(False)
 
@@ -723,6 +756,10 @@ class SecretaryTab(QWidget):
         }
 
     def _restore_chat_form(self, state):
+        with self._loading_fields():
+            self._restore_chat_form_fields(state)
+
+    def _restore_chat_form_fields(self, state):
         self.current_chat_override_id = state["id"]
         self.chat_override_id.setCurrentText(state["chat_id_text"])
         self.chat_history_count_label.setText(state["history_label"])
@@ -742,6 +779,12 @@ class SecretaryTab(QWidget):
             return
         if not self._validate_profile_numbers():
             return
+        chat_dirty = self._chat_dirty
+        chat_saved = False
+        if chat_dirty and self.chat_override_id.currentText().strip():
+            if not self.save_chat_override(silent=True):
+                return
+            chat_saved = True
         db = DatabaseManager()
         try:
             db.secretary.upsert_profile(
@@ -771,7 +814,10 @@ class SecretaryTab(QWidget):
         self.load_profiles(select_owner_id=owner_id)
         if self.current_owner_id == owner_id:
             self._restore_chat_form(chat_state)
+        keep_chat = chat_dirty and not chat_saved
         self._set_dirty(False)
+        if keep_chat:   # chat_id не указан: форма чата не сохранена, панель остаётся
+            self._set_chat_dirty(True)
 
     def delete_profile(self):
         if self.current_owner_id is None:
@@ -814,6 +860,11 @@ class SecretaryTab(QWidget):
         return 1 if value == "on" else 0
 
     def _reset_chat_override_form(self):
+        with self._loading_fields():
+            self._reset_chat_override_fields()
+        self._set_chat_dirty(False)
+
+    def _reset_chat_override_fields(self):
         self.current_chat_override_id = None
         self.chat_override_id.setCurrentText("")
         self._set_chat_history_count(None)
@@ -915,6 +966,12 @@ class SecretaryTab(QWidget):
             settings = db.secretary.get_chat_settings(self.current_owner_id, chat_id) or {}
         finally:
             db.close()
+        with self._loading_fields():
+            self._fill_chat_override(chat_id, settings)
+        self._set_chat_dirty(False)
+        inform(self, "Готово", "Настройки чата загружены.")
+
+    def _fill_chat_override(self, chat_id, settings):
         self.current_chat_override_id = chat_id
         self.chat_override_id.setCurrentText(str(chat_id))
         self._set_chat_history_count(self._lookup_chat_message_count(chat_id))
@@ -934,19 +991,20 @@ class SecretaryTab(QWidget):
         self.chat_media_stt.setCurrentText("inherit" if media_stt is None else ("on" if media_stt else "off"))
         media_images = settings.get("media_images_enabled")
         self.chat_media_images.setCurrentText("inherit" if media_images is None else ("on" if media_images else "off"))
-        inform(self, "Готово", "Настройки чата загружены.")
 
-    def save_chat_override(self):
+    def save_chat_override(self, silent: bool = False) -> bool:
+        if isinstance(silent, bool) is False:   # clicked(bool) передаёт checked
+            silent = False
         chat_id = self._read_chat_id()
         if chat_id is None:
-            return
+            return False
         ttl_text = self.chat_ttl.text().strip()
         if ttl_text:
             try:
                 int(ttl_text)
             except ValueError:
                 warn(self, "Некорректное значение", f"TTL чата: «{ttl_text}» не является целым числом. Настройки чата не сохранены.")
-                return
+                return False
         ttl_value = self._parse_positive_int(ttl_text, default=3600, minimum=0) if ttl_text else None
         prompt_text = self.chat_prompt.toPlainText().strip()
         db = DatabaseManager()
@@ -968,7 +1026,10 @@ class SecretaryTab(QWidget):
             db.secretary.add_event(self.current_owner_id, "updated", f"chat override saved chat_id={chat_id}", chat_id=chat_id)
         finally:
             db.close()
-        inform(self, "Сохранено", "Настройки чата сохранены.")
+        self._set_chat_dirty(False)
+        if not silent:
+            inform(self, "Сохранено", "Настройки чата сохранены.")
+        return True
 
     def clear_chat_override(self):
         self._reset_chat_override_form()

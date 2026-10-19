@@ -371,6 +371,7 @@ if __name__ == '__main__':
         sys.exit(0)
 
     app = QApplication(sys.argv)
+    app.setApplicationName("SnapMatch"); app.setDesktopFileName("snapmatch")  # app_id/WM_CLASS для .desktop
     # Дизайн-система: шрифты, стиль Fusion, подсказки и тема — до показа любых окон
     from gui.design import appearance
     from gui.design.tooltip import TooltipManager

@@ -1081,3 +1081,95 @@ def refresh_icons(root: QWidget | None = None) -> None:
         name = w.property("iconName") if isinstance(w, QAbstractButton) else None
         if name:
             w.setIcon(icons.icon(name, color=w.property("iconColor") or "text_muted"))
+
+
+class ElidedLabel(QLabel):
+    """Однострочная подпись: длинный текст обрезается многоточием, полный текст — в подсказке."""
+
+    def __init__(self, text: str = "", name: str = "") -> None:
+        super().__init__()
+        if name:
+            self.setObjectName(name)
+        self._full = text
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full = str(text)
+        super().setText(self._full)
+        self.updateGeometry()
+        self.update()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0, super().minimumSizeHint().height())
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.setFont(self.font())
+        shown = QFontMetrics(self.font()).elidedText(self._full, Qt.TextElideMode.ElideRight, self.width())
+        p.drawText(self.rect(), int(self.alignment()) | int(Qt.AlignmentFlag.AlignVCenter), shown)
+
+
+class ToolCard(QFrame):
+    """Плитка MCP-инструмента: название, описание и краткий список параметров (рисуется токенами темы)."""
+
+    def __init__(self, name: str, description: str, params: list[str], confirm: bool = False) -> None:
+        super().__init__()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(4)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        title = ElidedLabel(name, "cardTitle")
+        title.setToolTip(name)
+        head.addWidget(title, 1)
+        if confirm:
+            head.addWidget(StatusBadge("Подтверждение", "warn"))
+        lay.addLayout(head)
+        text = " ".join((description or "").split())
+        desc = QLabel(text if len(text) <= 240 else text[:237].rstrip() + "…")
+        desc.setObjectName("muted")
+        desc.setWordWrap(True)
+        if text:
+            desc.setToolTip(text)
+        else:
+            desc.setText("Без описания")
+        lay.addWidget(desc)
+        if params:
+            shown = params[:6] + ([f"+{len(params) - 6}"] if len(params) > 6 else [])
+            par = QLabel("  ".join(shown))
+            par.setObjectName("mono")
+            par.setWordWrap(True)
+            par.setToolTip("Параметры (* — обязательные):\n" + "\n".join(params))
+            lay.addWidget(par)
+        else:
+            none = QLabel("без параметров")
+            none.setObjectName("mono")
+            lay.addWidget(none)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        t = tokens()
+        if not t:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor(t["surface_alt"]))
+        p.setPen(QPen(QColor(t["border"]), 1))
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 10, 10)
+
+
+def tool_params(tool: dict) -> list[str]:
+    """Краткий список параметров инструмента из JSON-схемы: «name: type», обязательные помечены *."""
+    schema = tool.get("input_schema") or tool.get("inputSchema") or {}
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return []
+    required = set(schema.get("required") or [])
+    out = []
+    for key, spec in props.items():
+        kind = spec.get("type", "") if isinstance(spec, dict) else ""
+        if isinstance(kind, list):
+            kind = "|".join(str(k) for k in kind)
+        out.append(f"{key}{'*' if key in required else ''}" + (f": {kind}" if kind else ""))
+    return out

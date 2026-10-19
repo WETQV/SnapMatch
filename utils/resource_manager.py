@@ -1,8 +1,8 @@
 # utils/resource_manager.py
 import os
 import sys
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QFont, QColor
-from PyQt6.QtCore import QDir
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QFont, QColor, QImage
+from PyQt6.QtCore import QDir, Qt
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -34,6 +34,22 @@ def get_resource_path(relative_path):
         logger.debug(f"Ошибка при получении пути к ресурсу {relative_path}: {e}")
         return None
 
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
+
+
+def _build_multisize_icon(path):
+    """QIcon из PNG с набором размеров, масштабированных сглаживанием (для панели задач/Alt-Tab)."""
+    image = QImage(path)
+    if image.isNull():
+        return QIcon()
+    icon = QIcon()
+    for size in ICON_SIZES:
+        scaled = image if image.width() == size else image.scaled(
+            size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        icon.addPixmap(QPixmap.fromImage(scaled))
+    return icon
+
+
 def load_app_icon():
     """
     Загружает иконку приложения.
@@ -59,7 +75,7 @@ def load_app_icon():
         full_path = get_resource_path(icon_path)
         if full_path and os.path.exists(full_path):
             try:
-                icon = QIcon(full_path)
+                icon = _build_multisize_icon(full_path) if full_path.lower().endswith(".png") else QIcon(full_path)
                 if not icon.isNull():
                     logger.info(f"Загружена иконка приложения: {full_path}")
                     return icon

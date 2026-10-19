@@ -19,8 +19,21 @@ install -D -m 0755 "$APP_BINARY" "$PACKAGE_ROOT/opt/snapmatch/SnapMatch"
 install -D -m 0644 "$ROOT_DIR/LICENSE" "$PACKAGE_ROOT/usr/share/doc/snapmatch/copyright"
 install -D -m 0644 "$ROOT_DIR/packaging/linux/snapmatch.desktop" "$PACKAGE_ROOT/usr/share/applications/snapmatch.desktop"
 
+ICON_BASE="$PACKAGE_ROOT/usr/share/icons/hicolor"
+if [ -f "$ROOT_DIR/assets/snapmatch.svg" ]; then
+  install -D -m 0644 "$ROOT_DIR/assets/snapmatch.svg" "$ICON_BASE/scalable/apps/snapmatch.svg"
+fi
 if [ -f "$ROOT_DIR/assets/icon3.png" ]; then
-  install -D -m 0644 "$ROOT_DIR/assets/icon3.png" "$PACKAGE_ROOT/usr/share/icons/hicolor/256x256/apps/snapmatch.png"
+  for size in 16 24 32 48 64 128 256 512; do
+    mkdir -p "$ICON_BASE/${size}x${size}/apps"
+    python3 - "$ROOT_DIR/assets/icon3.png" "$ICON_BASE/${size}x${size}/apps/snapmatch.png" "$size" <<'PY'
+import sys
+from PIL import Image
+src, dst, size = sys.argv[1], sys.argv[2], int(sys.argv[3])
+Image.open(src).convert("RGBA").resize((size, size), Image.LANCZOS).save(dst)
+PY
+    chmod 0644 "$ICON_BASE/${size}x${size}/apps/snapmatch.png"
+  done
 fi
 
 mkdir -p "$PACKAGE_ROOT/usr/local/bin"

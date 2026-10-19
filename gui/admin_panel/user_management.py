@@ -11,6 +11,7 @@ from functools import partial
 from utils import server_state
 from utils.logger import setup_logger
 from utils import stats  # Импортируем модуль статистики
+import collections
 import datetime
 import logging
 
@@ -32,6 +33,9 @@ logger = setup_logger(__name__)
 
 # Ширина области таблицы+истории, начиная с которой они стоят рядом (иначе — друг под другом)
 SIDE_BY_SIDE_MIN_WIDTH = 890
+# Минимальные ширины карточек в раскладке «рядом» (в сумме с ручкой сплиттера ~ порог выше)
+SIDE_LEFT_MIN_W = 550
+SIDE_RIGHT_MIN_W = 330
 # Фиксированные ширины колонок с виджетами внутри ячеек (QHeaderView их содержимое не измеряет)
 COL_PRIORITY_W = 92
 COL_STATUS_W = 112
@@ -134,6 +138,7 @@ class UserManagement(QWidget):
         self._formats_theme_key = None
         self._splitter_sized = False
         self._log_theme_key = None
+        self._log_entries = collections.deque(maxlen=self.MAX_LOG_ENTRIES)  # (level, ts, lvl, name, msg)
         self.init_message_formats()
         
         # Настройка логгера для отображения в GUI
@@ -142,6 +147,11 @@ class UserManagement(QWidget):
         root_logger.addHandler(self.log_handler)
         
         self.init_ui()
+        try:  # перекраска журнала при смене темы
+            from gui.design import appearance
+            appearance.controller().changed.connect(self._rerender_logs_for_theme)
+        except Exception as e:
+            logger.warning(f"Не удалось подписаться на смену темы: {e}")
 
         # Кэш состояния истории: используем подпись, чтобы отслеживать изменения
         self._last_message_count = -1
@@ -415,8 +425,8 @@ class UserManagement(QWidget):
             self._splitter_sized = True
             self.splitter.setOrientation(wanted)
             if wide:
-                self._left_card.setMinimumSize(550, 0)
-                self._right_card.setMinimumSize(330, 0)
+                self._left_card.setMinimumSize(SIDE_LEFT_MIN_W, 0)
+                self._right_card.setMinimumSize(SIDE_RIGHT_MIN_W, 0)
                 total = max(self.splitter.width(), 1)
                 self.splitter.setSizes([total * 6 // 10, total * 4 // 10])
             else:
@@ -1265,73 +1275,97 @@ class UserManagement(QWidget):
             cursor = self.history_text.textCursor()
             cursor.insertText(f"ОШИБКА: {str(e)}\n\n", self.message_formats["error"])
 
-    MAX_LOG_BLOCKS = 3000
+    MAX_LOG_ENTRIES = 2000
+    MAX_LOG_BLOCKS = 2 * MAX_LOG_ENTRIES + 2  # запас: запись = блок текста + пустой блок
 
     def clear_logs(self):
+        self._log_entries.clear()
         self.logs_text.clear()
-    
+
+    @staticmethod
+    def _split_log_message(message):
+        """Разбор строки формата «ts - LEVEL - logger - msg» на части (None, если формат иной)."""
+        parts = message.split(" - ", 3)
+        if len(parts) == 4:
+            return tuple(parts)
+        return None, None, None, message
+
+    def _insert_log_entry(self, cursor, entry):
+        """Вставляет одну запись в начало документа; цвета берутся из токенов текущей темы."""
+        level, ts, lvl, name, msg = entry
+        t = current_tokens()
+        time_fmt = QTextCharFormat()
+        time_fmt.setForeground(QColor(t["text_muted"]))
+
+        level_fmt = QTextCharFormat(self.log_handler.log_formats.get(level, QTextCharFormat()))
+        level_fmt.setFontWeight(QFont.Weight.Bold)
+
+        name_fmt = QTextCharFormat()
+        name_fmt.setForeground(QColor(t["info"]))
+        name_fmt.setFontItalic(True)
+
+        msg_fmt = QTextCharFormat()
+        if level >= logging.ERROR:
+            msg_fmt.setForeground(QColor(t["danger"]))
+
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        if ts is not None:
+            cursor.insertText(ts, time_fmt)
+            cursor.insertText("  ")
+        if lvl is not None:
+            cursor.insertText(lvl, level_fmt)
+            cursor.insertText("  ")
+        if name is not None:
+            cursor.insertText(name, name_fmt)
+            cursor.insertText("  ")
+        if msg is not None:
+            cursor.insertText(msg, msg_fmt)
+        cursor.insertText("\n\n")  # дополнительный отступ между сообщениями
+
+    def _rerender_logs_for_theme(self, *_args):
+        """Смена темы: пересоздаём форматы и перерисовываем весь накопленный буфер новыми цветами."""
+        try:
+            key = self._theme_key()
+            if key == self._log_theme_key:
+                return
+            self._log_theme_key = key
+            self.log_handler.init_formats()
+            self.logs_text.setUpdatesEnabled(False)
+            try:
+                scrollbar = self.logs_text.verticalScrollBar()
+                position = scrollbar.value()
+                self.logs_text.clear()
+                cursor = self.logs_text.textCursor()
+                # Буфер хранится от старых к новым; вставка в начало даёт «новые сверху»
+                for entry in self._log_entries:
+                    self._insert_log_entry(cursor, entry)
+                scrollbar.setValue(position)
+            finally:
+                self.logs_text.setUpdatesEnabled(True)
+        except Exception as e:
+            logger.error(f"Ошибка перекраски журнала: {e}")
+
     def update_logs(self):
         try:
+            # Цвета могли устареть после смены темы (если сигнал не дошёл)
+            if self._theme_key() != self._log_theme_key:
+                self._rerender_logs_for_theme()
+
             logs = self.log_handler.get_logs()
             if not logs:
                 return
-                
+
             # Сохраняем текущую позицию скролла и близость к верху
             scrollbar = self.logs_text.verticalScrollBar()
             current_position = scrollbar.value()
             near_top = (current_position - scrollbar.minimum()) <= 50
-            
-            # Цвета уровней могли устареть после смены темы
-            if self._theme_key() != self._log_theme_key:
-                self._log_theme_key = self._theme_key()
-                self.log_handler.init_formats()
 
-            # Доступ к текстовому курсору
             cursor = self.logs_text.textCursor()
-            
-            # Добавляем все новые логи
             for level, message in logs:
-                # Парсим сообщение формата: ts - LEVEL - logger - msg
-                ts, lvl, name, msg = None, None, None, None
-                try:
-                    parts = message.split(" - ", 3)
-                    if len(parts) == 4:
-                        ts, lvl, name, msg = parts
-                    else:
-                        msg = message
-                except Exception:
-                    msg = message
-
-                # Форматы частей строки лога — из токенов темы
-                t = current_tokens()
-                time_fmt = QTextCharFormat()
-                time_fmt.setForeground(QColor(t["text_muted"]))
-
-                level_fmt = self.log_handler.log_formats.get(level, QTextCharFormat())
-                level_fmt.setFontWeight(QFont.Weight.Bold)
-
-                name_fmt = QTextCharFormat()
-                name_fmt.setForeground(QColor(t["info"]))
-                name_fmt.setFontItalic(True)
-
-                msg_fmt = QTextCharFormat()
-                if level >= logging.ERROR:
-                    msg_fmt.setForeground(QColor(t["danger"]))
-
-                # Вставка с подсветкой и отступами ВВЕРХ (новые сверху)
-                cursor.movePosition(QTextCursor.MoveOperation.Start)
-                if ts is not None:
-                    cursor.insertText(ts, time_fmt)
-                    cursor.insertText("  ")
-                if lvl is not None:
-                    cursor.insertText(lvl, level_fmt)
-                    cursor.insertText("  ")
-                if name is not None:
-                    cursor.insertText(name, name_fmt)
-                    cursor.insertText("  ")
-                if msg is not None:
-                    cursor.insertText(msg, msg_fmt)
-                cursor.insertText("\n\n")  # дополнительный отступ между сообщениями
+                ts, lvl, name, msg = self._split_log_message(message)
+                entry = (level, ts, lvl, name, msg)
+                self._log_entries.append(entry)  # deque(maxlen) сам отбрасывает самые старые
+                self._insert_log_entry(cursor, entry)
 
             # Ограничиваем размер журнала: новые записи сверху, старые отрезаем снизу
             # (setMaximumBlockCount тут не подходит — он удаляет с начала документа)

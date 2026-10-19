@@ -21,6 +21,7 @@ from PyQt6.QtCore import Qt, QTimer
 
 from gui.async_worker import run_in_background
 from gui.design.dialogs import ask, inform, prompt_text, warn
+from gui.design.widgets import ElidedLabel, ToolCard, tool_params
 from gui.admin_panel.ui_common import BadgeSlot, shrinkable, vertical_scroll
 from gui.design import (
     FxButton,
@@ -132,6 +133,7 @@ class McpTab(QWidget):
         layout.addLayout(stats)
 
         body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)   # иначе holder добавляет ~9 px по бокам: колонки смещены относительно плиток метрик
         body.setSpacing(16)
 
         # ── Список серверов ──
@@ -153,6 +155,9 @@ class McpTab(QWidget):
         self.cards_layout.setSpacing(8)
         self.cards_layout.addStretch()
         self.cards_scroll.setWidget(holder)
+        # Глобальный QScrollArea закрашен цветом фона окна — внутри карточки это тёмный «ящик» (особенно заметно в OLED)
+        self.cards_scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        self.cards_scroll.viewport().setAutoFillBackground(False)
         left_lay.addWidget(self.cards_scroll, 1)
         self.empty_label = label("Серверов пока нет. Нажмите «Добавить» или «Пример».", "muted")
         self.empty_label.setWordWrap(True)
@@ -171,14 +176,12 @@ class McpTab(QWidget):
         titles.setSpacing(2)
         name_row = QHBoxLayout()
         name_row.setSpacing(10)
-        self.title_label = label("Сервер не выбран", "h1")
-        self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.title_label = ElidedLabel("Сервер не выбран", "h1")
         self.status_badge = BadgeSlot("Нет данных", "idle", pulse=None)
         name_row.addWidget(self.title_label, 1)
         name_row.addWidget(self.status_badge)
         titles.addLayout(name_row)
-        self.cmdline_label = label("", "mono")
-        self.cmdline_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.cmdline_label = ElidedLabel("", "mono")
         titles.addWidget(self.cmdline_label)
         top.addLayout(titles, 1)
         right_lay.addLayout(top)
@@ -210,6 +213,8 @@ class McpTab(QWidget):
         self.pages.addWidget(vertical_scroll(self._build_config_page()))
         self.pages.addWidget(vertical_scroll(self._build_tools_page()))
         self.pages.addWidget(vertical_scroll(self._build_audit_page()))
+        for page_scroll in self.pages.findChildren(QScrollArea, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            page_scroll.setStyleSheet("QScrollArea { background: transparent; }")
         self.sections.changed.connect(self.pages.setCurrentIndex)
         right_lay.addWidget(self.pages, 1)
 
@@ -332,15 +337,62 @@ class McpTab(QWidget):
         lay.setContentsMargins(0, 4, 8, 4)
         lay.setSpacing(6)
         self.tools_preview = _mono_edit("Tools discovery result", 110, 100000, True)
+        self._tools_data: list = []
         self.resources_preview = _mono_edit("Resources and resource templates discovery result", 92, 100000, True)
         self.prompts_preview = _mono_edit("Prompts discovery result", 92, 100000, True)
-        lay.addWidget(label("TOOLS", "sectionLabel"))
-        lay.addWidget(self.tools_preview, 2)
+        tools_head = QHBoxLayout()
+        tools_head.addWidget(label("TOOLS", "sectionLabel"))
+        tools_head.addStretch()
+        self.tools_view_button = FxButton("JSON")
+        self.tools_view_button.setToolTip("Переключить вид инструментов: плитки или JSON")
+        tools_head.addWidget(self.tools_view_button)
+        lay.addLayout(tools_head)
+        self.tools_tiles = QWidget()
+        self.tools_tiles_lay = QVBoxLayout(self.tools_tiles)
+        self.tools_tiles_lay.setContentsMargins(0, 0, 0, 0)
+        self.tools_tiles_lay.setSpacing(8)
+        self.tools_stack = QStackedWidget()
+        self.tools_stack.addWidget(self.tools_tiles)
+        self.tools_stack.addWidget(self.tools_preview)
+        self.tools_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.tools_stack.currentChanged.connect(lambda _i: self._fit_tools_stack())
+        self.tools_view_button.clicked.connect(self._toggle_tools_view)
+        lay.addWidget(self.tools_stack)
         lay.addWidget(label("RESOURCES", "sectionLabel"))
         lay.addWidget(self.resources_preview, 1)
         lay.addWidget(label("PROMPTS", "sectionLabel"))
         lay.addWidget(self.prompts_preview, 1)
         return page
+
+    def _set_tools(self, tools) -> None:
+        """Обновляет оба вида инструментов: плитки и JSON."""
+        self._tools_data = [t for t in (tools or []) if isinstance(t, dict)]
+        self.tools_preview.setPlainText(json.dumps(tools, ensure_ascii=False, indent=2) if tools else "")
+        while self.tools_tiles_lay.count():
+            item = self.tools_tiles_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not self._tools_data:
+            empty = label("Инструментов нет. Нажмите «Проверить», чтобы получить список с сервера.", "muted")
+            empty.setWordWrap(True)
+            self.tools_tiles_lay.addWidget(empty)
+        for tool in self._tools_data:
+            self.tools_tiles_lay.addWidget(ToolCard(
+                str(tool.get("name") or "—"), str(tool.get("description") or ""),
+                tool_params(tool), bool(tool.get("requires_confirmation")),
+            ))
+        self._fit_tools_stack()
+
+    def _fit_tools_stack(self) -> None:
+        """Плитки занимают ровно свою высоту (страница прокручивается целиком), JSON — своё поле."""
+        tiles = self.tools_stack.currentWidget() is self.tools_tiles
+        self.tools_stack.setMaximumHeight(16777215 if not tiles else max(40, self.tools_tiles.sizeHint().height()))
+        self.tools_stack.setMinimumHeight(0 if tiles else 200)
+
+    def _toggle_tools_view(self) -> None:
+        to_json = self.tools_stack.currentWidget() is self.tools_tiles
+        self.tools_stack.setCurrentWidget(self.tools_preview if to_json else self.tools_tiles)
+        self.tools_view_button.setText("Плитки" if to_json else "JSON")
 
     def _build_audit_page(self) -> QWidget:
         page = QWidget()
@@ -484,9 +536,12 @@ class McpTab(QWidget):
                 "mdi6.web" if transport != "stdio" else "mdi6.console",
             )
             # Длинное имя/команда не должны растягивать список — обрезаются, полный текст в подсказке
-            for lbl in server_card.findChildren(QLabel):
-                if lbl.objectName() in ("cardTitle", "mono") and lbl.text() in (name, subtitle):
-                    lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            info_col = server_card.layout().itemAt(1).layout()
+            for idx, text, obj in ((0, name, "cardTitle"), (1, subtitle, "mono")):
+                old = info_col.itemAt(idx).widget()
+                new = ElidedLabel(text, obj)
+                info_col.replaceWidget(old, new)
+                old.deleteLater()
             _tip(server_card, name, f"{command or 'команда не задана'}\nСтатус: {status_text}. Доступ: {access_text or 'нет'}")
             server_card.clicked.connect(self._on_card_clicked)
             self.cards_layout.insertWidget(self.cards_layout.count() - 1, server_card)
@@ -600,7 +655,7 @@ class McpTab(QWidget):
         self._set_access_checks(server["access"])
         self.description.setPlainText(server["description"])
         tools = server.get("tools") or []
-        self.tools_preview.setPlainText(json.dumps(tools, ensure_ascii=False, indent=2) if tools else "")
+        self._set_tools(tools)
         resources = {
             "resources": server.get("resources") or [],
             "resource_templates": server.get("resource_templates") or [],
@@ -781,7 +836,7 @@ class McpTab(QWidget):
         servers[self.current_row]["prompts"] = capabilities.get("prompts") or []
         settings_manager.settings.setdefault("mcp", {})["servers"] = servers
         settings_manager.save_settings()
-        self.tools_preview.setPlainText(json.dumps(servers[self.current_row]["tools"], ensure_ascii=False, indent=2))
+        self._set_tools(servers[self.current_row]["tools"])
         self.resources_preview.setPlainText(json.dumps({
             "resources": servers[self.current_row]["resources"],
             "resource_templates": servers[self.current_row]["resource_templates"],
