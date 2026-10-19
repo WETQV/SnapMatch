@@ -11,6 +11,7 @@ import random
 import re
 import time
 import sys
+import threading
 from typing import AsyncGenerator, Dict, List, Optional, Any
 from urllib.parse import urlparse
 import aiohttp
@@ -189,6 +190,24 @@ def _extract_usage_totals(usage: Any, provider: str = "") -> tuple[Optional[int]
     return prompt_tokens, completion_tokens, total_tokens
 
 
+_usage_db = None
+_usage_db_lock = threading.Lock()
+
+
+def _persist_usage(model_id, in_tokens, out_tokens) -> None:
+    """Пишет токены запроса в token_usage вместе с model_id; ошибки БД не мешают ответу."""
+    global _usage_db
+    try:
+        with _usage_db_lock:
+            if _usage_db is None:
+                from utils.database.usage_db import UsageDB
+                _usage_db = UsageDB()
+            db = _usage_db
+        db.add_usage(model_id, in_tokens, out_tokens)
+    except Exception as e:
+        logger.warning(f"Учёт токенов по моделям недоступен: {e}")
+
+
 def _record_usage(response, messages=None, response_text=None, model_id=None):
     """
     Записывает использование токенов в глобальную статистику.
@@ -213,6 +232,7 @@ def _record_usage(response, messages=None, response_text=None, model_id=None):
                 usage_recorded = True
             
             if usage_recorded:
+                _persist_usage(model_id, prompt_tokens, completion_tokens)
                 logger.debug(
                     "Токены получены от API (%s): +%s вход, +%s выход",
                     provider or "unknown",
@@ -233,6 +253,7 @@ def _record_usage(response, messages=None, response_text=None, model_id=None):
                 out_tokens = count_tokens(response_text, model_id=model_id)
                 stats.stats.add_output_tokens(out_tokens)
             
+            _persist_usage(model_id, in_tokens, out_tokens)
             logger.debug(f"Токены посчитаны локально (fallback): +{in_tokens} вход, +{out_tokens} выход")
         elif not usage_recorded:
             logger.warning("Не удалось зафиксировать использование токенов: нет данных от API и нет текста для fallback")

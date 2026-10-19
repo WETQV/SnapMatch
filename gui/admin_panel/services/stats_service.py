@@ -350,3 +350,8 @@ class StatsService:
     def get_usage_stats() -> Dict:
         """Топ MCP-инструментов, события секретаря и распределение сообщений по режиму."""
         return StatsService._with_db(lambda db: db.mcp.get_usage_stats(5), {})
+
+    @staticmethod
+    def get_usage_by_model() -> Dict:
+        """Токены и запросы в разбивке по моделям (из token_usage)."""
+        return StatsService._with_db(lambda db: db.usage.get_usage_by_model(8), {})

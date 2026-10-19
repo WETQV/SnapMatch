@@ -334,6 +334,25 @@ class BaseDB:
                 """
             )
 
+            self.cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id TEXT,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            # model_id добавляется как nullable-колонка; существующие строки не меняются (NULL = «модель неизвестна»)
+            if "model_id" not in self._get_table_columns("token_usage"):
+                self.cursor.execute("ALTER TABLE token_usage ADD COLUMN model_id TEXT")
+                logger.info("Добавлена колонка 'model_id' в таблицу token_usage")
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_token_usage_model ON token_usage(model_id)"
+            )
+
             user_columns = self._get_table_columns("users")
             user_additional_columns = {
                 "preferences": "ALTER TABLE users ADD COLUMN preferences TEXT",

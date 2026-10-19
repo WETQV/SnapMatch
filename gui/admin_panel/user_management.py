@@ -901,6 +901,26 @@ class UserManagement(QWidget):
             "Сообщения", ", ".join(f"{k} {n}" for k, n in modes.items()) if modes else "Нет данных"))
         return self._create_stats_section("Чем пользовались", rows)
 
+    def _build_model_usage_card(self, m: dict) -> QWidget:
+        """Карточка «Токены по моделям»: запросы, входные и выходные токены (старые записи — «не указана»)."""
+        models = (m or {}).get("models") or []
+        if not models:
+            return self._create_stats_section("Токены по моделям", [label("Нет данных", "muted")])
+        fmt = lambda n: self._format_stat_value(n, compact=False)
+        table = make_table(["Модель", "Запросов", "Вход", "Выход"], [
+            [r["model"] or "не указана", fmt(r["requests"]), fmt(r["input"]), fmt(r["output"])]
+            for r in models
+        ])
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        table.verticalHeader().setDefaultSectionSize(26)
+        table.horizontalHeader().setFixedHeight(30)
+        table.setFixedHeight(30 + 26 * len(models) + 4)
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rows = [table]
+        if m.get("more"):
+            rows.append(label(f"И ещё моделей: {m['more']}", "muted"))
+        return self._create_stats_section("Токены по моделям", rows)
+
     def show_full_stats(self):
         """Показывает окно со статистикой сеанса и историей прошлых сеансов."""
         try:
@@ -952,6 +972,7 @@ class UserManagement(QWidget):
             extra.addWidget(self._build_voice_stats_card(self.stats_service.get_voice_stats()), 1)
             extra.addWidget(self._build_usage_stats_card(self.stats_service.get_usage_stats()), 1)
             main_layout.addLayout(extra)
+            main_layout.addWidget(self._build_model_usage_card(self.stats_service.get_usage_by_model()))
 
             # История сеансов
             history_card, history_layout = card()
