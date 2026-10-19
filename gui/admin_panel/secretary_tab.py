@@ -547,8 +547,58 @@ class SecretaryTab(QWidget):
         if prompt_text is not None:
             self.refresh_secretary_prompt_status(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+    def _validate_profile_numbers(self) -> bool:
+        """Некорректные числа не подменяются молча значением по умолчанию — показываем предупреждение."""
+        checks = (
+            ("Задержка по умолчанию", self.default_delay.text(), float),
+            ("Окно серии сообщений", self.burst_window.text(), float),
+            ("Макс. сообщений в пачке", self.max_batch_messages.text(), int),
+            ("TTL сессии по умолчанию", self.default_session_ttl.text(), int),
+        )
+        for label, text, kind in checks:
+            try:
+                kind(str(text).strip().replace(",", ".") if kind is float else str(text).strip())
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "Некорректное значение", f"Поле «{label}»: «{text}» не является числом. Профиль не сохранён.")
+                return False
+        return True
+
+    def _capture_chat_form(self):
+        return {
+            "id": self.current_chat_override_id,
+            "chat_id_text": self.chat_override_id.currentText(),
+            "history_label": self.chat_history_count_label.text(),
+            "mode": self.chat_response_mode.currentText(),
+            "prompt": self.chat_prompt.toPlainText(),
+            "history": self.chat_history.currentText(),
+            "ttl": self.chat_ttl.text(),
+            "close": self.chat_close_after_reply.currentText(),
+            "turn": self.chat_turn_based_replies.currentText(),
+            "owner": self.chat_owner_behavior.currentText(),
+            "mcp": self.chat_allowed_mcp.toPlainText(),
+            "stt": self.chat_media_stt.currentText(),
+            "images": self.chat_media_images.currentText(),
+        }
+
+    def _restore_chat_form(self, state):
+        self.current_chat_override_id = state["id"]
+        self.chat_override_id.setCurrentText(state["chat_id_text"])
+        self.chat_history_count_label.setText(state["history_label"])
+        self.chat_response_mode.setCurrentText(state["mode"])
+        self.chat_prompt.setPlainText(state["prompt"])
+        self.chat_history.setCurrentText(state["history"])
+        self.chat_ttl.setText(state["ttl"])
+        self.chat_close_after_reply.setCurrentText(state["close"])
+        self.chat_turn_based_replies.setCurrentText(state["turn"])
+        self.chat_owner_behavior.setCurrentText(state["owner"])
+        self.chat_allowed_mcp.setPlainText(state["mcp"])
+        self.chat_media_stt.setCurrentText(state["stt"])
+        self.chat_media_images.setCurrentText(state["images"])
+
     def save_profile(self):
         if self.current_owner_id is None:
+            return
+        if not self._validate_profile_numbers():
             return
         db = DatabaseManager()
         try:
@@ -573,10 +623,24 @@ class SecretaryTab(QWidget):
             )
         finally:
             db.close()
-        self.load_profiles(select_owner_id=self.current_owner_id)
+        # Перезагрузка таблицы пере-выбирает строку и сбрасывает форму чата — сохраняем несохранённый ввод
+        chat_state = self._capture_chat_form()
+        owner_id = self.current_owner_id
+        self.load_profiles(select_owner_id=owner_id)
+        if self.current_owner_id == owner_id:
+            self._restore_chat_form(chat_state)
 
     def delete_profile(self):
         if self.current_owner_id is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Удалить владельца",
+            f"Удалить secretary-профиль владельца {self.current_owner_id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
         db = DatabaseManager()
         try:
@@ -740,6 +804,12 @@ class SecretaryTab(QWidget):
         if chat_id is None:
             return
         ttl_text = self.chat_ttl.text().strip()
+        if ttl_text:
+            try:
+                int(ttl_text)
+            except ValueError:
+                QMessageBox.warning(self, "Некорректное значение", f"TTL чата: «{ttl_text}» не является целым числом. Настройки чата не сохранены.")
+                return
         ttl_value = self._parse_positive_int(ttl_text, default=3600, minimum=0) if ttl_text else None
         prompt_text = self.chat_prompt.toPlainText().strip()
         db = DatabaseManager()
