@@ -212,7 +212,8 @@ if bundle_vosk:
         raise RuntimeError('Vosk build requires a local model with am and conf directories.')
 
 version_file = 'version_info.txt' if sys.platform.startswith('win') and os.path.exists('version_info.txt') else None
-icon_file = os.path.join('assets', 'icon3.ico') if os.path.exists(os.path.join(project_root, 'assets', 'icon3.ico')) else None
+icon_name = 'icon3.ico' if sys.platform.startswith('win') else 'icon3.png'
+icon_file = os.path.join('assets', icon_name) if os.path.exists(os.path.join(project_root, 'assets', icon_name)) else None
 
 a = Analysis(
     ['main.py'],

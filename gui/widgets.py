@@ -7,6 +7,15 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont
 
 
+def _symbol_font(size: int) -> QFont:
+    """Шрифт для ▲▼: Segoe UI Symbol на Windows, DejaVu/Noto на Linux."""
+    font = QFont()
+    font.setFamilies(["Segoe UI Symbol", "DejaVu Sans", "Noto Sans Symbols2", "Sans Serif"])
+    font.setPointSize(size)
+    return font
+
+
+
 class UnicodeSpinBox(QWidget):
     """
     Кастомный SpinBox с отдельными кнопками вверх/вниз на основе Unicode-стрелочек.
@@ -57,14 +66,14 @@ class UnicodeSpinBox(QWidget):
         # Кнопка вверх (маленькая)
         self.btn_up = QPushButton("▲")
         self.btn_up.setFixedSize(18, 14)
-        self.btn_up.setFont(QFont("Segoe UI Symbol", 7))
+        self.btn_up.setFont(_symbol_font(7))
         self.btn_up.setAccessibleName("spinbox_up")
         self.btn_up.clicked.connect(self._on_up_clicked)
         
         # Кнопка вниз (маленькая)
         self.btn_down = QPushButton("▼")
         self.btn_down.setFixedSize(18, 14)
-        self.btn_down.setFont(QFont("Segoe UI Symbol", 7))
+        self.btn_down.setFont(_symbol_font(7))
         self.btn_down.setAccessibleName("spinbox_down")
         self.btn_down.clicked.connect(self._on_down_clicked)
         
@@ -178,14 +187,14 @@ class UnicodeDoubleSpinBox(QWidget):
         # Кнопка вверх (маленькая)
         self.btn_up = QPushButton("▲")
         self.btn_up.setFixedSize(18, 14)
-        self.btn_up.setFont(QFont("Segoe UI Symbol", 7))
+        self.btn_up.setFont(_symbol_font(7))
         self.btn_up.setAccessibleName("spinbox_up")
         self.btn_up.clicked.connect(self._on_up_clicked)
         
         # Кнопка вниз (маленькая)
         self.btn_down = QPushButton("▼")
         self.btn_down.setFixedSize(18, 14)
-        self.btn_down.setFont(QFont("Segoe UI Symbol", 7))
+        self.btn_down.setFont(_symbol_font(7))
         self.btn_down.setAccessibleName("spinbox_down")
         self.btn_down.clicked.connect(self._on_down_clicked)
         

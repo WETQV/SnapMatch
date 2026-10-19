@@ -228,17 +228,30 @@ class VoiceSettingsTab(QWidget):
             self.lbl_ffmpeg_status.setStyleSheet("color: #F44336;")
 
     def _show_ffmpeg_help(self):
-        msg = (
-            "Для обработки голосовых сообщений и кружочков нужен FFmpeg.\n\n"
-            "1. В сборке он лежит в assets/ffmpeg/ffmpeg.exe.\n"
-            "2. В режиме разработки можно положить ffmpeg.exe в папку проекта\n"
-            "   или добавить FFmpeg в PATH системы.\n\n"
-            "Открыть сайт загрузки?"
-        )
+        import sys
+        if sys.platform == "win32":
+            msg = (
+                "Для обработки голосовых сообщений и кружочков нужен FFmpeg.\n\n"
+                "1. В сборке он лежит в assets/ffmpeg/ffmpeg.exe.\n"
+                "2. В режиме разработки можно положить ffmpeg.exe в папку проекта\n"
+                "   или добавить FFmpeg в PATH системы.\n\n"
+                "Открыть сайт загрузки?"
+            )
+            url = "https://www.gyan.dev/ffmpeg/builds/"
+        else:
+            msg = (
+                "Для обработки голосовых сообщений и кружочков нужен FFmpeg.\n\n"
+                "Установите его пакетным менеджером и перезапустите приложение:\n"
+                "  Debian/Ubuntu:  sudo apt install ffmpeg\n"
+                "  Fedora:         sudo dnf install ffmpeg\n"
+                "  Arch:           sudo pacman -S ffmpeg\n\n"
+                "Открыть сайт FFmpeg?"
+            )
+            url = "https://ffmpeg.org/download.html"
         reply = QMessageBox.question(self, "Установка FFmpeg", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             import webbrowser
-            webbrowser.open("https://www.gyan.dev/ffmpeg/builds/")
+            webbrowser.open(url)
 
     def _browse_model_path(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Выберите папку с моделью Vosk", self.lbl_path.text())

@@ -5,15 +5,24 @@ from typing import IO, Optional
 
 
 def _lock_path(app_name: str) -> Path:
-    base_dir = os.getenv("LOCALAPPDATA") or tempfile.gettempdir()
-    lock_dir = Path(base_dir) / app_name
-    lock_dir.mkdir(parents=True, exist_ok=True)
+    from utils.app_paths import get_runtime_dir
+
+    lock_dir = get_runtime_dir()
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        lock_dir = Path(tempfile.gettempdir()) / f"{app_name}-{os.getuid() if hasattr(os, 'getuid') else 'user'}"
+        lock_dir.mkdir(parents=True, exist_ok=True)
     return lock_dir / f"{app_name}.lock"
 
 
 def acquire_single_instance_lock(app_name: str = "SnapMatch") -> Optional[IO[str]]:
     path = _lock_path(app_name)
-    handle = path.open("a+", encoding="utf-8")
+    try:
+        handle = path.open("a+", encoding="utf-8")
+    except OSError:
+        # Файл заблокирован правами (создан другим пользователем) — не роняем запуск
+        return None
 
     try:
         if os.name == "nt":

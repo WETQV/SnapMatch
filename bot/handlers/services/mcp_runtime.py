@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+import signal
 import subprocess
 import time
 from contextlib import asynccontextmanager
@@ -88,6 +89,8 @@ def start_server_process(server_config: Dict[str, Any]) -> Dict[str, Any]:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
+            # Linux/macOS: отдельная группа процессов, чтобы остановить и потомков (npx -> node)
+            start_new_session=(os.name != "nt"),
         )
         time.sleep(0.2)
         if process.poll() is not None:
@@ -176,12 +179,25 @@ def _stop_process_tree(process: subprocess.Popen, *, timeout_seconds: float) -> 
                 process.wait(timeout=timeout_seconds)
                 return
 
-    process.terminate()
+    _signal_process_group(process, signal.SIGTERM)
     try:
         process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
-        process.kill()
+        _signal_process_group(process, signal.SIGKILL)
         process.wait(timeout=timeout_seconds)
+
+
+def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
+    """Шлёт сигнал всей группе процесса (он лидер своей сессии); если не вышло — только самому процессу."""
+    try:
+        os.killpg(os.getpgid(process.pid), sig)
+        return
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        pass
+    try:
+        process.send_signal(sig)
+    except (ProcessLookupError, OSError):
+        pass
 
 
 def _with_windows_node_path(env: Dict[str, str]) -> Dict[str, str]:

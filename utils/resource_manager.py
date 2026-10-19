@@ -41,6 +41,8 @@ def load_app_icon():
     """
     # Список возможных путей к иконкам (в порядке предпочтения)
     icon_paths = [
+        # PNG первым: на Linux Qt читает его без плагина imageformats для .ico
+        "assets/icon3.png",
         "assets/icon3.ico",
         "assets/icon.ico",
         "assets/icon.png", 
