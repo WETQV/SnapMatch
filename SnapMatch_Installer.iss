@@ -35,8 +35,13 @@ OutputDir=installer_output
 OutputBaseFilename=SnapMatch_Setup_v{#MyAppVersion}
 ; Используем альтернативную иконку
 SetupIconFile=assets\icon3.ico
-WizardImageFile=WizardImageFile.png
-WizardSmallImageFile=WizardSmallImageFile.png
+; ОФОРМЛЕНИЕ: светлая и тёмная тема (следует за системой Windows), брендовые картинки в нескольких размерах для DPI
+WizardImageFile=packaging\windows\wizard_164.png,packaging\windows\wizard_246.png,packaging\windows\wizard_328.png
+WizardImageFileDynamicDark=packaging\windows\wizard_164_dark.png,packaging\windows\wizard_246_dark.png,packaging\windows\wizard_328_dark.png
+WizardSmallImageFile=packaging\windows\wizard_small_55.png,packaging\windows\wizard_small_82.png,packaging\windows\wizard_small_110.png
+WizardSmallImageFileDynamicDark=packaging\windows\wizard_small_55_dark.png,packaging\windows\wizard_small_82_dark.png,packaging\windows\wizard_small_110_dark.png
+WizardImageBackColor=white
+WizardImageBackColorDynamicDark=#0F1117
 VersionInfoVersion={#MyAppVersion}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoTextVersion={#MyAppVersion}
@@ -47,7 +52,7 @@ VersionInfoProductName={#MyAppName}
 VersionInfoOriginalFileName=SnapMatch_Setup_v{#MyAppVersion}.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
-WizardStyle=modern
+WizardStyle=modern windows11 dynamic
 
 ; ПОДДЕРЖИВАЕМЫЕ СИСТЕМЫ
 MinVersion=6.1sp1
