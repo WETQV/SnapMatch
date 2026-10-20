@@ -41,8 +41,8 @@ if exist "version_info.txt" del "version_info.txt"
     echo. >> version_info.txt
     echo VSVersionInfo^( >> version_info.txt
     echo   ffi=FixedFileInfo^( >> version_info.txt
-    echo     filevers=^(1, 0, 4, 3^), >> version_info.txt
-    echo     prodvers=^(1, 0, 4, 3^), >> version_info.txt
+    echo     filevers=^(1, 0, 5, 0^), >> version_info.txt
+    echo     prodvers=^(1, 0, 5, 0^), >> version_info.txt
     echo     mask=0x3f, >> version_info.txt
     echo     flags=0x0, >> version_info.txt
     echo     OS=0x40004, >> version_info.txt
