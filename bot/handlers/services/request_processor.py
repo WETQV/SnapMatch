@@ -556,12 +556,14 @@ async def _send_response_streaming(
     try:
         async for chunk in stream_from_model(prepared_messages, settings, model_id):
             accumulated += chunk
-            
-            preview = _strip_think_tags(accumulated)
-            
+
             now = time.monotonic()
-            # Обновляем, если прошло время И накопилось достаточно новых символов
-            if now - last_edit_time >= edit_interval and len(preview) >= last_sent_len + MIN_CHARS_TO_EDIT:
+            # Regex по всему тексту — только когда подошёл интервал (раньше на каждый чанк, O(N²))
+            if now - last_edit_time < edit_interval:
+                continue
+            preview = _strip_think_tags(accumulated)
+            # Обновляем, если накопилось достаточно новых символов
+            if len(preview) >= last_sent_len + MIN_CHARS_TO_EDIT:
                 try:
                     if sent_msg:
                         # Применяем умное форматирование с автозакрытием тегов

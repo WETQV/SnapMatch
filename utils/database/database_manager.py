@@ -3,7 +3,9 @@ from config.settings import settings_manager
 from .message_db import MessageDB
 from .mcp_db import McpDB
 from .secretary_db import SecretaryDB
+from .usage_db import UsageDB
 from .user_db import UserDB
+from .voice_db import VoiceDB
 
 
 class DatabaseManager:
@@ -11,6 +13,8 @@ class DatabaseManager:
         self._users = None
         self._messages = None
         self._mcp = None
+        self._voice = None
+        self._usage = None
         self._secretary = None
         self.settings_manager = settings_manager
 
@@ -38,7 +42,25 @@ class DatabaseManager:
             self._mcp = McpDB()
         return self._mcp
 
+    @property
+    def voice(self) -> VoiceDB:
+        if self._voice is None:
+            self._voice = VoiceDB()
+        return self._voice
+
+    @property
+    def usage(self) -> UsageDB:
+        if self._usage is None:
+            self._usage = UsageDB()
+        return self._usage
+
     def close(self):
+        if self._usage is not None:
+            self._usage.close()
+            self._usage = None
+        if self._voice is not None:
+            self._voice.close()
+            self._voice = None
         if self._users is not None:
             self._users.close()
             self._users = None

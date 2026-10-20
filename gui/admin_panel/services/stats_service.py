@@ -323,3 +323,35 @@ class StatsService:
             return len(blocks)
         except Exception:
             return 0
+
+    @staticmethod
+    def _with_db(func, default):
+        from utils.database.database_manager import DatabaseManager
+        db = None
+        try:
+            db = DatabaseManager()
+            return func(db)
+        except Exception as e:
+            logger.error(f"Ошибка чтения статистики из БД: {e}")
+            return default
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def get_voice_stats() -> Dict:
+        """Агрегаты по голосовым/кружкам из voice_transcriptions (хранятся последние ~2000 записей)."""
+        return StatsService._with_db(lambda db: db.voice.get_voice_stats(), {})
+
+    @staticmethod
+    def get_usage_stats() -> Dict:
+        """Топ MCP-инструментов, события секретаря и распределение сообщений по режиму."""
+        return StatsService._with_db(lambda db: db.mcp.get_usage_stats(5), {})
+
+    @staticmethod
+    def get_usage_by_model() -> Dict:
+        """Токены и запросы в разбивке по моделям (из token_usage)."""
+        return StatsService._with_db(lambda db: db.usage.get_usage_by_model(8), {})

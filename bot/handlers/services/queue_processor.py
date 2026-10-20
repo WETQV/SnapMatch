@@ -58,7 +58,9 @@ class QueueProcessor:
     
     async def process_queue(self):
         """Основной цикл обработки очереди запросов."""
-        # Инициализируем клиенты моделей
+        # Подставляем актуальные чат-модели OpenAI вместо отключённых, затем инициализируем клиенты
+        from utils.openai_models import refresh_chat_models
+        await refresh_chat_models(settings_manager)
         init_model_clients()
         
         # Логируем настройки

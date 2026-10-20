@@ -4,12 +4,16 @@ import json
 import os
 import random
 import shutil
+import sys
 import tempfile
+import time
 from utils.encryption import encryption
 
 SETTINGS_FILE = 'config.json'
-SYSTEM_PROMPT_HISTORY_FILE = 'system_prompt_history.json'
-SYSTEM_PROMPT_TEMPLATES_FILE = 'system_prompt_templates.json'
+# Списки лежат рядом с config.json, а не зависят от текущего каталога процесса
+_SETTINGS_DIR = os.path.dirname(os.path.abspath(SETTINGS_FILE))
+SYSTEM_PROMPT_HISTORY_FILE = os.path.join(_SETTINGS_DIR, 'system_prompt_history.json')
+SYSTEM_PROMPT_TEMPLATES_FILE = os.path.join(_SETTINGS_DIR, 'system_prompt_templates.json')
 
 DEFAULT_SECRETARY_MODE = {
     "enabled": False,
@@ -113,13 +117,17 @@ class SettingsManager:
                 "respond_only_on_mention": False,
                 "reject_empty_mentions": True,
                 "secretary_mode": default_secretary_mode(),
-                "oled_mode": False,
+                "oled_mode": False,   # устарел: источник правды — ui_theme (значение синхронизируется)
+                "ui_theme": "dark",       # system | dark | light | oled
+                "ui_accent": "brand",     # system | brand | #RRGGBB
+                "ui_frameless": sys.platform.startswith('linux'),    # собственная рамка окна (по умолчанию на Linux)
+                "ui_animations": True,
                 "stt_enabled": False,
                 "stt_engine": "vosk",  # "vosk", "openai", "groq"
                 "stt_model_path": "assets/models/stt/vosk",
                 "stt_annotate": False,
                 "stt_openai_key": "",
-                "stt_openai_model": "whisper-1",
+                "stt_openai_model": "gpt-transcribe",
                 "stt_groq_key": "",
                 "stt_groq_model": "whisper-large-v3",
                 "stt_custom_key": "",
@@ -128,7 +136,7 @@ class SettingsManager:
                 "stt_max_upload_mb": 25,
                 "models": [
                     {
-                        "id": "gpt-3.5-turbo",
+                        "id": "gpt-5.6-terra",
                         "api_key": "",
                         "base_url": "https://api.openai.com/v1",
                         "weight": 1,
@@ -194,6 +202,7 @@ class SettingsManager:
         self._ensure_rich_messages_defaults()
         if 'oled_mode' not in self.settings:
             self.settings['oled_mode'] = False
+        self._ensure_ui_defaults()
         if 'stt_enabled' not in self.settings:
             self.settings['stt_enabled'] = False
         if 'stt_engine' not in self.settings:
@@ -205,7 +214,10 @@ class SettingsManager:
         if 'stt_openai_key' not in self.settings:
             self.settings['stt_openai_key'] = ""
         if 'stt_openai_model' not in self.settings:
-            self.settings['stt_openai_model'] = "whisper-1"
+            self.settings['stt_openai_model'] = "gpt-transcribe"
+        # whisper-1 и gpt-4o-*transcribe отключаются 26.02.2027: до этой даты сохранённое значение рабочее
+        from utils.openai_models import migrate_stt_settings
+        migrate_stt_settings(self.settings)
         if 'stt_groq_key' not in self.settings:
             self.settings['stt_groq_key'] = ""
         if 'stt_groq_model' not in self.settings:
@@ -428,43 +440,66 @@ class SettingsManager:
         self._update_global_vars()
         return True
 
-    def load_system_prompt_templates(self):
+    @staticmethod
+    def _read_json_list(path, label):
+        """Читает JSON-список. Битый файл не затирается пустым списком, а откладывается в *.corrupt-<время>."""
+        if not os.path.exists(path):
+            return []
         try:
-            if not os.path.exists(SYSTEM_PROMPT_TEMPLATES_FILE):
-                return []
-            with open(SYSTEM_PROMPT_TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if isinstance(data, list):
                 return data
+            raise ValueError("ожидался список")
         except Exception as e:
-            print(f"Ошибка при загрузке шаблонов системного промпта: {e}")
+            backup = f"{path}.corrupt-{int(time.time())}"
+            try:
+                os.replace(path, backup)
+                print(f"Ошибка при загрузке {label}: {e}. Файл сохранён как {backup}")
+            except OSError:
+                print(f"Ошибка при загрузке {label}: {e}")
         return []
+
+    @staticmethod
+    def _write_json_list_atomic(path, items, label):
+        """Атомарная запись: временный файл + os.replace, чтобы сбой не оставил обрезанный JSON."""
+        target = os.path.abspath(path)
+        temp_path = None
+        try:
+            fd, temp_path = tempfile.mkstemp(prefix=".snapmatch-list-", suffix=".tmp", dir=os.path.dirname(target))
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(list(items or []), f, indent=4, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, target)
+            temp_path = None
+            return True
+        except Exception as e:
+            print(f"Ошибка при сохранении {label}: {e}")
+            return False
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def load_system_prompt_templates(self):
+        data = self._read_json_list(SYSTEM_PROMPT_TEMPLATES_FILE, "шаблонов системного промпта")
+        self._system_prompt_templates_cache = list(data)
+        return data
 
     def save_system_prompt_templates(self, templates):
-        try:
-            with open(SYSTEM_PROMPT_TEMPLATES_FILE, 'w', encoding='utf-8') as f:
-                json.dump(list(templates or []), f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка при сохранении шаблонов системного промпта: {e}")
+        items = list(templates or [])
+        if self._write_json_list_atomic(SYSTEM_PROMPT_TEMPLATES_FILE, items, "шаблонов системного промпта"):
+            self._system_prompt_templates_cache = items
 
     def load_system_prompt_history(self):
-        try:
-            if not os.path.exists(SYSTEM_PROMPT_HISTORY_FILE):
-                return []
-            with open(SYSTEM_PROMPT_HISTORY_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            print(f"Ошибка при загрузке истории системного промпта: {e}")
-        return []
+        data = self._read_json_list(SYSTEM_PROMPT_HISTORY_FILE, "истории системного промпта")
+        self._system_prompt_history_cache = list(data)
+        return data
 
     def save_system_prompt_history(self, history):
-        try:
-            with open(SYSTEM_PROMPT_HISTORY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(list(history or []), f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка при сохранении истории системного промпта: {e}")
+        items = list(history or [])
+        if self._write_json_list_atomic(SYSTEM_PROMPT_HISTORY_FILE, items, "истории системного промпта"):
+            self._system_prompt_history_cache = items
 
     def _migrate_legacy_prompt_history(self):
         legacy_history = list(self.settings.get('system_prompt_history', []) or [])
@@ -514,8 +549,16 @@ class SettingsManager:
     def get_settings(self):
         # Для обратной совместимости добавляем старые поля
         settings_copy = self.settings.copy()
-        settings_copy["system_prompt_history"] = self.load_system_prompt_history()
-        settings_copy["system_prompt_templates"] = self.load_system_prompt_templates()
+        # Списки держим в памяти (файлы пишет только это приложение); отдаём копии,
+        # чтобы вызывающий код не мог испортить кэш.
+        history = getattr(self, '_system_prompt_history_cache', None)
+        if history is None:
+            history = self.load_system_prompt_history()
+        templates = getattr(self, '_system_prompt_templates_cache', None)
+        if templates is None:
+            templates = self.load_system_prompt_templates()
+        settings_copy["system_prompt_history"] = [dict(x) if isinstance(x, dict) else x for x in history]
+        settings_copy["system_prompt_templates"] = [dict(x) if isinstance(x, dict) else x for x in templates]
         
         # Если есть хотя бы одна модель, используем первую для обратной совместимости
         if "models" in settings_copy and settings_copy["models"]:
@@ -580,6 +623,14 @@ class SettingsManager:
         self._ensure_secretary_defaults()
         self.save_settings()
 
+    def _ensure_ui_defaults(self):
+        """Настройки оформления. Миграция: старый oled_mode=True без ui_theme -> ui_theme='oled'."""
+        if 'ui_theme' not in self.settings:
+            self.settings['ui_theme'] = 'oled' if self.settings.get('oled_mode') else 'dark'
+        self.settings.setdefault('ui_accent', 'brand')
+        self.settings.setdefault('ui_frameless', sys.platform.startswith('linux'))
+        self.settings.setdefault('ui_animations', True)
+
     def reload_settings(self):
         self.load_settings()
         if 'admin_telegram_ids' not in self.settings:
@@ -593,6 +644,7 @@ class SettingsManager:
         self._ensure_bot_access_policy()
         self._ensure_audit_retention_settings()
         self._ensure_secretary_defaults()
+        self._ensure_ui_defaults()
         # Обновляем счетчики загрузки моделей
         self.model_loads = {model["id"]: self.model_loads.get(model["id"], 0) 
                            for model in self.settings.get("models", [])}

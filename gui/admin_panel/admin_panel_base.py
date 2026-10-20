@@ -1,20 +1,31 @@
 # gui/admin_panel/admin_panel_base.py
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QWidget, QVBoxLayout, QTabWidget, QLabel
+    QApplication, QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
+    QVBoxLayout, QWidget,
 )
+from PyQt6.QtCore import QSize, Qt, QTimer
 from gui.admin_panel.user_management import UserManagement
 from gui.admin_panel.settings_panel import SettingsPanel  # Импортируем ваш реальный SettingsPanel
 from gui.admin_panel.voice_settings_tab import VoiceSettingsTab
+from gui.admin_panel.voice_history_tab import VoiceHistoryTab
 from gui.admin_panel.extra_settings_tab import ExtraSettingsTab
 from gui.admin_panel.mcp_tab import McpTab
 from gui.admin_panel.secretary_tab import SecretaryTab
+from gui.design import appearance, icons, motion
+from gui.design.dialogs import ask, warn
+from gui.design.shell import BRAND_GREEN, BRAND_RED, FrameController, TitleBar, logo_label, prepare_translucent
+from gui.design.widgets import GlowRoot, label
+from gui.splash_screen import APP_VERSION
 from bot.handlers.services.mcp_runtime import stop_all_server_processes
 from utils import server_state
 from utils.logger import setup_logger
 import datetime
 
 logger = setup_logger(__name__)
+
+SIDEBAR_WIDTH = 224
+
 
 class AdminPanelBase(QMainWindow):
     def __init__(self, bot_thread):
@@ -28,256 +39,149 @@ class AdminPanelBase(QMainWindow):
         self.setWindowTitle('SnapMatch')
         self.resize(1180, 900)
         self.setMinimumSize(960, 720)
+        # Прозрачность окна включается ДО первого show() и остаётся всегда (иначе на Wayland не будет
+        # альфа-канала и у скруглённой рамки останутся квадратные уголки). Без собственной рамки корень
+        # рисует непрозрачный фон.
+        prepare_translucent(self)
 
-        # Создаем центральный виджет и устанавливаем макет
-        central_widget = QWidget()
-        central_widget.setObjectName("centralWidget")
-        self.setCentralWidget(central_widget)
+        # Корень рисует фон окна, полосу боковой панели и скругление; панель и заголовок прозрачные
+        self.root = GlowRoot()
+        self.root.setObjectName("root")
+        self.root.sidebar_w = SIDEBAR_WIDTH
+        self.setCentralWidget(self.root)
+        outer = QVBoxLayout(self.root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.titlebar = TitleBar(self)
+        outer.addWidget(self.titlebar)
+        self.frame = FrameController(self, self.root, self.titlebar)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        outer.addLayout(body, 1)
 
-        main_layout = QVBoxLayout()
-        central_widget.setLayout(main_layout)
+        # Боковая панель: бренд, навигация, версия
+        side = QWidget()
+        side.setObjectName("sidebar")
+        side.setFixedWidth(SIDEBAR_WIDTH)
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(14, 18, 14, 14)
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(6, 0, 0, 6)
+        brand_row.setSpacing(10)
+        brand_row.addWidget(logo_label(32))
+        brand = label("", "brand")
+        brand.setTextFormat(Qt.TextFormat.RichText)
+        brand.setText(f'<span style="color:{BRAND_GREEN}">Snap</span><span style="color:{BRAND_RED}">Match</span>')
+        brand_row.addWidget(brand)
+        brand_row.addStretch()
+        sl.addLayout(brand_row)
+        self.nav = QListWidget()
+        self.nav.setObjectName("nav")
+        self.nav.setIconSize(QSize(20, 20))
+        sl.addWidget(self.nav, 1)
+        sl.addWidget(label(f"v{APP_VERSION}", "muted"))
+        body.addWidget(side)
 
-        # Создаем вкладки
-        self.tab_widget = QTabWidget()
-        main_layout.addWidget(self.tab_widget)
+        self.pages = motion.FadeStack()
+        body.addWidget(self.pages, 1)
+        self.toast = motion.Toast(self.root)
+        self._nav_icons: list[str] = []
 
-        # Панель управления пользователями
+        # Страницы — существующие вкладки (их внутренности переносятся на новый дизайн поэтапно)
         self.user_management = UserManagement(self.bot_thread)
-        self.tab_widget.addTab(self.user_management, "Управление пользователями")
+        self.add_page("Пользователи", "mdi6.account-group-outline", self.user_management)
 
         # Панель настроек (передаем bot_thread)
         self.settings_panel = SettingsPanel(self.bot_thread)
-        self.tab_widget.addTab(self.settings_panel, "Настройки")
+        self.add_page("Настройки", "mdi6.tune-variant", self.settings_panel)
 
-        # Настройки голоса
         self.voice_tab = VoiceSettingsTab(self)
-        self.tab_widget.addTab(self.voice_tab, "Голос")
+        self.add_page("Голос", "mdi6.microphone-outline", self.voice_tab)
 
-        # Дополнительные настройки
+        # История расшифровок голосовых и кружочков
+        self.voice_history_tab = VoiceHistoryTab(self)
+        self.add_page("Расшифровки", "mdi6.text-recognition", self.voice_history_tab)
+
         self.extra_tab = ExtraSettingsTab(self)
-        self.tab_widget.addTab(self.extra_tab, "Доп настройки")
+        self.add_page("Доп. настройки", "mdi6.cog-outline", self.extra_tab)
 
         self.mcp_tab = McpTab(self)
-        self.tab_widget.addTab(self.mcp_tab, "MCP")
+        self.add_page("MCP", "mdi6.puzzle-outline", self.mcp_tab)
 
         self.secretary_tab = SecretaryTab(self)
-        self.tab_widget.addTab(self.secretary_tab, "Секретарь")
+        self.add_page("Секретарь", "mdi6.briefcase-outline", self.secretary_tab)
+
+        # Подсветка-«пилюля» выбранного пункта навигации
+        self.indicator = motion.NavIndicator(self.nav.viewport())
+        self.nav.currentRowChanged.connect(self._on_nav)
+        self.nav.setCurrentRow(0)
+        QTimer.singleShot(0, lambda: self._move_indicator(animate=False))
+
+        # Оформление: применяем до показа окна, дальше слушаем смену темы и рамки
+        self.appearance = appearance.controller()
+        self.appearance.changed.connect(self._on_appearance_changed)
+        self.appearance.frameless_changed.connect(self.frame.set_frameless)
+        self.apply_theme()
+        self.frame.set_frameless(self.appearance.settings["ui_frameless"])
 
         # Инициализируем статус сервера
         self.initialize_server()
-        
-        # Применяем тему (OLED или обычную)
-        self.apply_theme()
+        # Старые вкладки: после показа подгоняем кнопки под текст (пока их не перенесли на FxButton)
+        QTimer.singleShot(0, self._fit_buttons_to_text)
+
+    def _fit_buttons_to_text(self):
+        """Снимает жёсткие ограничения ширины, из-за которых текст кнопок обрезался."""
+        for button in self.findChildren(QPushButton):
+            if not button.text():
+                continue  # стрелки спинбоксов и иконочные кнопки не трогаем
+            needed = button.sizeHint().width() + 8
+            if button.maximumWidth() < needed:
+                button.setMaximumWidth(16777215)
+            if button.minimumWidth() < needed:
+                button.setMinimumWidth(needed)
+
+    # ── навигация ──
+    def add_page(self, title: str, icon_name: str, widget: QWidget) -> int:
+        """Добавляет экран: пункт боковой навигации + страница в FadeStack. Возвращает индекс."""
+        item = QListWidgetItem(icons.nav_icon(icon_name), title, self.nav)
+        item.setToolTip(title)
+        self._nav_icons.append(icon_name)
+        return self.pages.addWidget(widget)
+
+    def show_page(self, page) -> None:
+        """Переключает экран по индексу или по виджету-странице."""
+        index = page if isinstance(page, int) else self.pages.indexOf(page)
+        if index >= 0:
+            self.nav.setCurrentRow(index)
+
+    def _on_nav(self, row: int) -> None:
+        if row >= 0:
+            self.pages.setCurrentIndex(row)
+            self.titlebar.set_title(self.nav.item(row).text())
+            self._move_indicator()
+
+    def _move_indicator(self, animate: bool = True) -> None:
+        item = self.nav.currentItem()
+        if item is not None:
+            self.indicator.move_to(self.nav.visualItemRect(item), animate)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.toast.hide()
+        QTimer.singleShot(0, lambda: self._move_indicator(animate=False))
+
+    # ── оформление ──
+    def _on_appearance_changed(self, _tokens):
+        for i, name in enumerate(self._nav_icons):
+            self.nav.item(i).setIcon(icons.nav_icon(name))
+        self.root.update()
 
     def apply_theme(self):
-        """Применяет тему оформления (OLED или стандартную)"""
-        from PyQt6.QtGui import QPalette, QColor
-        from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
-        from config.settings import settings_manager
-        settings = settings_manager.get_settings()
-        is_oled = settings.get('oled_mode', False)
-        
-        # 🎨 ПОЛУЧАЕМ СИСТЕМНЫЙ АКЦЕНТНЫЙ ЦВЕТ
-        # Вытягиваем тот самый цвет, который пользователь выбрал в Windows
-        system_accent = QApplication.palette().color(QPalette.ColorRole.Highlight)
-        accent_color = system_accent.name()
-        
-        # Определяем цвета для палитры
-        if is_oled:
-            tooltip_bg = QColor("#050505")
-            tooltip_fg = QColor("#FFFFFF")
-            border_color = "#333333"
-            header_bg = "#000000"
-            window_bg = "#000000"
-            panel_bg = "#000000"
-        else:
-            tooltip_bg = QColor("#2d2d2d")
-            tooltip_fg = QColor("#FFFFFF")
-            border_color = "#444444"
-            header_bg = "#252526"
-            window_bg = "#1e1e1e"
-            panel_bg = "#252526"
-
-        # Устанавливаем палитру для подсказок
-        palette = QApplication.palette()
-        palette.setColor(QPalette.ColorRole.ToolTipBase, tooltip_bg)
-        palette.setColor(QPalette.ColorRole.ToolTipText, tooltip_fg)
-        QApplication.setPalette(palette)
-        
-        # Общие стили для обоих режимов
-        common_style = f"""
-            QTabWidget::pane {{ 
-                border: 1px solid {border_color}; 
-                top: -1px; 
-                background-color: {window_bg};
-            }}
-            QTabWidget::tab-bar {{ alignment: left; }}
-            QTabBar::tab {{
-                padding: 10px 15px;
-                margin-right: 2px;
-                border: 1px solid {border_color};
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                background-color: {header_bg};
-                color: #888888;
-            }}
-            QTabBar::tab:selected {{
-                background-color: {window_bg};
-                color: #FFFFFF;
-                border-bottom: 2px solid {accent_color}; /* Системный акцент! */
-            }}
-            QPushButton {{
-                padding: 6px 12px;
-                border-radius: 4px;
-                border: 1px solid {border_color};
-                background-color: {header_bg};
-                color: #FFFFFF;
-            }}
-            QPushButton:hover {{
-                background-color: {border_color};
-            }}
-            QLineEdit, QSpinBox, QComboBox, QTextEdit {{
-                padding: 5px;
-                border-radius: 4px;
-                border: 1px solid {border_color};
-                background-color: {panel_bg};
-                color: #FFFFFF;
-            }}
-            
-            /* Стили для кастомных кнопок UnicodeSpinBox */
-            QPushButton[accessibleName="spinbox_up"], 
-            QPushButton[accessibleName="spinbox_down"] {{
-                padding: 2px 4px;
-                border-radius: 2px;
-                border: 1px solid {border_color};
-                background-color: {header_bg};
-                color: #FFFFFF;
-                min-width: 20px;
-            }}
-            QPushButton[accessibleName="spinbox_up"]:hover, 
-            QPushButton[accessibleName="spinbox_down"]:hover {{
-                background-color: {border_color};
-            }}
-            QGroupBox {{
-                font-weight: bold;
-                border: 2px solid {border_color}; /* Сделали границу чуть толще для видимости */
-                border-radius: 8px;
-                margin-top: 1.1em;
-                padding-top: 0.8em;
-                background-color: transparent;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-                color: {accent_color}; /* Заголовок группы тоже в акцент */
-            }}
-            QToolTip {{
-                background-color: {tooltip_bg.name()};
-                color: {tooltip_fg.name()};
-                border: 1px solid {accent_color};
-                border-radius: 6px;
-                padding: 0px;
-            }}
-            QHeaderView::section {{
-                background-color: {header_bg};
-                color: #FFFFFF;
-                padding: 6px;
-                border: 1px solid {border_color};
-            }}
-            QHeaderView {{
-                background-color: {window_bg};
-            }}
-            QTableCornerButton::section {{
-                background-color: {window_bg};
-                border: 1px solid {border_color};
-            }}
-            QHeaderView::section:vertical {{
-                background-color: {window_bg};
-                border: 1px solid {border_color};
-            }}
-            QTableWidget {{
-                gridline-color: {border_color};
-                background-color: {window_bg};
-                border: 1px solid {border_color};
-            }}
-            QScrollArea {{
-                border: none;
-                background-color: transparent;
-            }}
-            /* Это важно для того, чтобы контент внутри скролла не терял стили */
-            QScrollArea > QWidget > QWidget {{
-                background-color: transparent;
-            }}
-            QScrollBar:vertical {{
-                width: 10px;
-                background: transparent;
-                margin: 0px;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {border_color};
-                min-height: 30px;
-                border-radius: 5px;
-                margin: 2px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background-color: {accent_color};
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-                background: none;
-            }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
-
-            QScrollBar:horizontal {{
-                height: 10px;
-                background: transparent;
-                margin: 0px;
-            }}
-            QScrollBar::handle:horizontal {{
-                background-color: {border_color};
-                min-width: 30px;
-                border-radius: 5px;
-                margin: 2px;
-            }}
-            QScrollBar::handle:horizontal:hover {{
-                background-color: {accent_color};
-            }}
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-                width: 0px;
-                background: none;
-            }}
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
-                background: none;
-            }}
-            QLabel {{
-                color: #FFFFFF;
-                background: transparent;
-            }}
-            /* Стили для всех диалоговых окон и сообщений */
-            QDialog, QMessageBox {{
-                background-color: {window_bg};
-                color: #FFFFFF;
-            }}
-            QDialog QLabel, QMessageBox QLabel {{
-                color: #FFFFFF;
-            }}
-        """
-
-        # Применяем финальный стиль к главному окну
-        self.setStyleSheet(f"QMainWindow, QWidget#centralWidget {{ background-color: {window_bg}; }} " + common_style)
-        logger.info(f"Применена тема (OLED: {is_oled}) с системным акцентом {accent_color}")
-
-        # Обновляем все дочерние элементы
-        self.style().unpolish(self)
-        self.style().polish(self)
-        
-        # Специальный вызов для панели настроек (с передачей акцента)
-        if hasattr(self.settings_panel, "apply_theme"):
-            self.settings_panel.apply_theme(is_oled, accent_color)
+        """Тонкая обёртка над новой системой оформления: (пере)применяет тему из настроек ко всему приложению.
+        Оставлена для обратной совместимости (её вызывают вкладки после сохранения настроек)."""
+        self.appearance.settings = appearance.load_settings()
+        self.appearance.apply()
 
     def setup_bot_signals(self):
         """Настройка сигналов от bot_thread"""
@@ -373,7 +277,7 @@ class AdminPanelBase(QMainWindow):
             logger.warning(f"Настройки невалидны - перезапуск отменен. Ошибки: {', '.join(errors)}")
             
             # Показываем сообщение пользователю
-            QMessageBox.warning(
+            warn(
                 self,
                 "Невалидные настройки",
                 f"Не удается запустить бота:\n\n" + "\n".join(f"• {error}" for error in errors)
@@ -388,7 +292,7 @@ class AdminPanelBase(QMainWindow):
             logger.info("Останавливаем текущий бот...")
             if not self.bot_thread.stop_and_wait(15000):
                 logger.warning("Smart restart cancelled because previous BotThread is still running.")
-                QMessageBox.warning(
+                warn(
                     self,
                     "Перезапуск отменен",
                     "Не удалось корректно остановить текущий сеанс бота. Попробуйте закрыть приложение и запустить его снова."
@@ -431,33 +335,22 @@ class AdminPanelBase(QMainWindow):
             return
 
         if server_state.server_active:
-            reply = QMessageBox.question(
-                self, 'Выход',
-                'Сохранить статистику текущего сеанса перед выходом?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
+            save_stats = ask(self, 'Выход', 'Сохранить статистику текущего сеанса перед выходом?',
+                             yes="Сохранить", no="Не сохранять", default="no")
 
             self._closing = True
-            if reply == QMessageBox.StandardButton.Yes:
+            if save_stats:
                 try:
                     self.user_management.save_session_statistics()
                 except Exception as e:
                     logger.error(f"Ошибка при сохранении статистики сеанса: {e}")
-                    QMessageBox.warning(
+                    warn(
                         self,
                         "Ошибка",
                         "Не удалось сохранить статистику сеанса."
                     )
         else:
-            reply = QMessageBox.question(
-                self, 'Выход',
-                'Вы действительно хотите выйти?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-
-            if reply != QMessageBox.StandardButton.Yes:
+            if not ask(self, 'Выход', 'Вы действительно хотите выйти?', yes="Выйти", no="Остаться", default="no"):
                 self._closing = False
                 event.ignore()
                 return
@@ -466,7 +359,7 @@ class AdminPanelBase(QMainWindow):
         if not self._shutdown_runtime():
             self._closing = False
             event.ignore()
-            QMessageBox.warning(
+            warn(
                 self,
                 "Завершение работы",
                 "Фоновые операции ещё завершаются. Подождите немного и закройте приложение повторно.",

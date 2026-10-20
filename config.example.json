@@ -76,7 +76,7 @@
   "stt_model_path": "assets/models/stt/vosk",
   "stt_annotate": false,
   "stt_openai_key": "",
-  "stt_openai_model": "whisper-1",
+  "stt_openai_model": "gpt-transcribe",
   "stt_groq_key": "",
   "stt_groq_model": "whisper-large-v3",
   "models": [

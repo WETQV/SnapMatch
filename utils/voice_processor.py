@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from utils.logger import setup_logger
+from utils.openai_models import DEFAULT_STT_MODEL, OPENAI_BASE_URL, effective_openai_stt_model
 from config.settings import settings_manager
 
 logger = setup_logger(__name__)
@@ -65,6 +66,10 @@ def resolve_ffmpeg_path() -> str | None:
 
     return shutil.which("ffmpeg")
 
+class VoskNotInstalledError(RuntimeError):
+    """Локальный движок Vosk не установлен или его нативная библиотека не загрузилась."""
+
+
 class VoiceProcessor:
     def __init__(self):
         self.model = None
@@ -81,10 +86,9 @@ class VoiceProcessor:
             return self._vosk_module
         except Exception as e:
             self._vosk_import_error = e
-            logger.warning("Vosk недоступен: %s", e)
-            raise RuntimeError(
+            raise VoskNotInstalledError(
                 "Vosk не установлен или его нативная библиотека не загрузилась. "
-                "Установите локальные STT-зависимости либо выберите openai, groq или custom."
+                "Установите локальные STT-зависимости (requirements-local-stt.txt) либо выберите openai, groq или custom."
             ) from e
 
     def _ensure_model_loaded(self):
@@ -148,8 +152,9 @@ class VoiceProcessor:
         
         if engine == 'openai':
             api_key = settings.get('stt_openai_key')
-            model = settings.get('stt_openai_model', 'whisper-1')
-            base_url = "https://api.openai.com/v1"
+            # После даты отключения старых моделей (26.02.2027) подставляется gpt-transcribe
+            model = effective_openai_stt_model(settings.get('stt_openai_model', DEFAULT_STT_MODEL))
+            base_url = OPENAI_BASE_URL
         elif engine == 'groq':
             api_key = settings.get('stt_groq_key')
             model = settings.get('stt_groq_model', 'whisper-large-v3-turbo')
@@ -185,7 +190,13 @@ class VoiceProcessor:
                 content_type = mimetypes.guess_type(media_path)[0] or 'application/octet-stream'
                 form_data.add_field('file', file_data, filename=os.path.basename(media_path), content_type=content_type)
                 form_data.add_field('model', model)
-                form_data.add_field('language', 'ru')
+                if engine == 'openai' and model.lower().startswith('gpt-transcribe'):
+                    # gpt-transcribe принимает список languages вместо language; обе формы вместе API отклоняет.
+                    # response_format не передаём: по умолчанию json с полем text подходит всем моделям
+                    # (verbose_json и timestamp_granularities есть только у whisper-1).
+                    form_data.add_field('languages[]', 'ru')
+                else:
+                    form_data.add_field('language', 'ru')
                 
                 try:
                     async with session.post(

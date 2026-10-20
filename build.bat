@@ -16,7 +16,7 @@ python --version 2>nul || (
 echo.
 
 echo Installing dependencies...
-pip install -r requirements.txt
+pip install -r requirements-build.txt
 if errorlevel 1 (
     echo ERROR: Failed to install dependencies!
     pause
@@ -27,7 +27,7 @@ echo.
 echo Checking PyInstaller...
 pip show pyinstaller >nul 2>&1 || (
     echo Installing PyInstaller...
-    pip install pyinstaller
+    pip install -r requirements-build.txt
 )
 
 echo Creating version info file...
@@ -58,12 +58,12 @@ if exist "version_info.txt" del "version_info.txt"
     echo           [ >> version_info.txt
     echo             StringStruct^(u'CompanyName', u'WETQV Development'^), >> version_info.txt
     echo             StringStruct^(u'FileDescription', u'SnapMatch'^), >> version_info.txt
-    echo             StringStruct^(u'FileVersion', u'1.0.4.3'^), >> version_info.txt
+    echo             StringStruct^(u'FileVersion', u'1.0.5.0'^), >> version_info.txt
     echo             StringStruct^(u'InternalName', u'SnapMatch'^), >> version_info.txt
     echo             StringStruct^(u'LegalCopyright', u'2026 WETQV. All rights reserved.'^), >> version_info.txt
     echo             StringStruct^(u'OriginalFilename', u'SnapMatch.exe'^), >> version_info.txt
     echo             StringStruct^(u'ProductName', u'SnapMatch'^), >> version_info.txt
-    echo             StringStruct^(u'ProductVersion', u'1.0.4.3'^), >> version_info.txt
+    echo             StringStruct^(u'ProductVersion', u'1.0.5.0'^), >> version_info.txt
     echo             StringStruct^(u'Comments', u'Desktop AI Assistant with Telegram Bot Integration'^), >> version_info.txt
     echo           ] >> version_info.txt
     echo         ^) >> version_info.txt
@@ -106,7 +106,7 @@ if exist "dist\SnapMatch.exe" (
         echo File size: %%~zI bytes (~!size_mb! MB^)
     )
     echo Building standard installer...
-    call build_installer.bat SnapMatch_Installer.iss SnapMatch_Setup_v1.0.4.3.exe nopause
+    call build_installer.bat SnapMatch_Installer.iss SnapMatch_Setup_v1.0.5.0.exe nopause
     if errorlevel 1 exit /b 1
     echo.
     echo Created by: WETQV
@@ -125,7 +125,7 @@ if exist "dist\SnapMatch.exe" (
     echo Check the logs above for error details.
     echo.
     echo Common issues:
-    echo - Missing dependencies (install with: pip install -r requirements.txt)
+    echo - Missing dependencies (install with: pip install -r requirements-build.txt)
     echo - Icon file not found (check assets\icon3.ico)
     echo - PyInstaller errors (check Python version compatibility)
 )

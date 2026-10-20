@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 python3 --version
 python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements-build.txt
 rm -rf build dist
 pyinstaller --noconfirm --clean snapmatch.spec
 
@@ -16,4 +16,4 @@ fi
 bash packaging/linux/build_deb.sh
 
 echo "Build complete: dist/SnapMatch"
-echo "Debian package: dist/SnapMatch_${SNAPMATCH_VERSION:-1.0.4.3}_${SNAPMATCH_ARCH:-amd64}.deb"
+echo "Debian package: dist/SnapMatch_${SNAPMATCH_VERSION:-1.0.5.0}_${SNAPMATCH_ARCH:-amd64}.deb"

@@ -5,4 +5,6 @@ Comment=Telegram bot manager with AI models and MCP tools
 Exec=/opt/snapmatch/SnapMatch
 Icon=snapmatch
 Terminal=false
+StartupWMClass=SnapMatch
+StartupNotify=true
 Categories=Utility;Network;

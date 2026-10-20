@@ -252,3 +252,31 @@ class McpDB(BaseDB):
             "count": len(arguments),
         }
         return json.dumps(summary, ensure_ascii=False)
+
+    def get_usage_stats(self, top: int = 5) -> Dict[str, Any]:
+        """Агрегаты для окна «Статистика»: топ MCP-инструментов, события секретаря, режимы сообщений."""
+        result: Dict[str, Any] = {"mcp_top": [], "secretary_events": {}, "message_modes": {}}
+        try:
+            self.cursor.execute(
+                """
+                SELECT server_name, tool_name, COUNT(*) AS n,
+                       COALESCE(SUM(status NOT IN ('completed', 'ok', 'success')), 0) AS errors
+                FROM mcp_tool_calls
+                GROUP BY server_name, tool_name
+                ORDER BY n DESC, server_name, tool_name LIMIT ?
+                """,
+                (int(top),),
+            )
+            result["mcp_top"] = [
+                {"server": r[0], "tool": r[1], "calls": r[2], "errors": r[3]}
+                for r in self.cursor.fetchall()
+            ]
+            self.cursor.execute("SELECT status, COUNT(*) FROM secretary_events GROUP BY status ORDER BY 2 DESC")
+            result["secretary_events"] = {k: v for k, v in self.cursor.fetchall()}
+            self.cursor.execute(
+                "SELECT COALESCE(source_mode, 'normal'), COUNT(*) FROM messages GROUP BY 1 ORDER BY 2 DESC"
+            )
+            result["message_modes"] = {k: v for k, v in self.cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Не удалось получить статистику использования: {e}")
+        return result

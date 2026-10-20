@@ -12,6 +12,11 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
+# Выбор каталога данных (config.json, БД, логи) — строго до импорта config.settings,
+# который читает config.json по относительному пути. Подробности — utils/app_paths.py.
+from utils.app_paths import enter_data_dir
+enter_data_dir()
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from gui.admin_panel.admin_panel_base import AdminPanelBase
@@ -366,7 +371,33 @@ if __name__ == '__main__':
         sys.exit(0)
 
     app = QApplication(sys.argv)
+    app.setApplicationName("SnapMatch"); app.setDesktopFileName("snapmatch")  # app_id/WM_CLASS для .desktop
+    # Дизайн-система: шрифты, стиль Fusion, подсказки и тема — до показа любых окон
+    from gui.design import appearance
+    from gui.design.tooltip import TooltipManager
+    appearance.load_fonts(app)
+    appearance.init(app).apply()
+    tooltip_manager = TooltipManager(app)
     atexit.register(release_single_instance_lock, single_instance_lock)
+
+    # Ctrl+C / kill / завершение сеанса: выходим из event loop, дальше штатно останавливаются
+    # бот и MCP-процессы (без этого они оставались сиротами). Пустой таймер нужен, чтобы
+    # интерпретатор Python регулярно получал управление и мог выполнить обработчик сигнала.
+    import signal
+    from PyQt6.QtCore import QTimer
+
+    def _graceful_exit(signum, _frame):
+        logger.info("Получен сигнал %s — завершаем работу", signum)
+        app.exit(0)
+
+    for _sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(_sig, _graceful_exit)
+        except (ValueError, OSError):
+            pass
+    _signal_pump = QTimer()
+    _signal_pump.start(500)
+    _signal_pump.timeout.connect(lambda: None)
     
     # Устанавливаем иконку приложения
     try:
@@ -384,26 +415,30 @@ if __name__ == '__main__':
         splash.show()
         
         # Обрабатываем события, чтобы отобразить заставку
+        splash.set_status("Подготовка…", 0.05)
         app.processEvents()
-        
+
         # СОЗДАЕМ BotThread, но НЕ ЗАПУСКАЕМ его автоматически
         bot_thread = BotThread()
-        
+
         # Проверяем настройки ПЕРЕД запуском бота
         logger.info("Проверка настроек перед запуском бота...")
-        
+        splash.set_status("Проверка настроек…", 0.25)
+        app.processEvents()
+
         if settings_manager.is_ready_for_bot():
             logger.info("Настройки валидны - запускаем бота автоматически")
+            splash.set_status("Запуск бота…", 0.5)
+            app.processEvents()
             bot_thread.start()
         else:
             is_valid, errors = settings_manager.validate_settings()
             logger.warning(f"Настройки невалидны - бот не запущен. Ошибки: {', '.join(errors)}")
 
-        # Ждем, пока анимация заставки закончится
-        while splash.isVisible():
-            app.processEvents()
-
-        # Показываем главное окно после завершения анимации
+        # Главное окно собираем, пока заставка на экране (раньше ждали
+        # фиксированную анимацию ~6 с в цикле processEvents — 100% CPU)
+        splash.set_status("Загрузка интерфейса…", 0.75)
+        app.processEvents()
         panel = AdminPanelBase(bot_thread)
         
         # Устанавливаем иконку и для главного окна
@@ -415,6 +450,8 @@ if __name__ == '__main__':
         except Exception as e:
             logger.warning(f"Не удалось установить иконку для главного окна: {e}")
         
+        splash.set_status("Готово", 1.0)
+        splash.finish_and_wait()
         panel.show()
 
         try:

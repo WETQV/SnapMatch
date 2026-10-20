@@ -284,6 +284,30 @@ class BaseDB:
 
             self.cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS voice_transcriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER,
+                    chat_type TEXT,
+                    telegram_message_id INTEGER,
+                    author_telegram_id INTEGER,
+                    author_username TEXT,
+                    media_type TEXT,
+                    engine TEXT,
+                    duration_sec REAL,
+                    status TEXT NOT NULL,
+                    text TEXT,
+                    error TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_voice_transcriptions_created "
+                "ON voice_transcriptions(created_at)"
+            )
+
+            self.cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS mcp_server_status (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     server_name TEXT UNIQUE NOT NULL,
@@ -308,6 +332,25 @@ class BaseDB:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
                 """
+            )
+
+            self.cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id TEXT,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            # model_id добавляется как nullable-колонка; существующие строки не меняются (NULL = «модель неизвестна»)
+            if "model_id" not in self._get_table_columns("token_usage"):
+                self.cursor.execute("ALTER TABLE token_usage ADD COLUMN model_id TEXT")
+                logger.info("Добавлена колонка 'model_id' в таблицу token_usage")
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_token_usage_model ON token_usage(model_id)"
             )
 
             user_columns = self._get_table_columns("users")
@@ -408,6 +451,23 @@ class BaseDB:
                     except sqlite3.OperationalError as e:
                         logger.warning(f"Не удалось добавить колонку '{column}': {e}")
 
+            # Индексы под основные выборки истории (раньше — полный скан messages)
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_chat_ts "
+                "ON messages(chat_id, timestamp, id)"
+            )
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_user_chat_ts "
+                "ON messages(user_id, chat_id, timestamp)"
+            )
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_secretary_source_chat "
+                "ON messages(secretary_source_chat_id)"
+            )
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_chat_tgid "
+                "ON messages(chat_id, telegram_message_id)"
+            )
             self.cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_secretary_context "
                 "ON messages(source_mode, secretary_owner_telegram_id, secretary_source_chat_id)"
