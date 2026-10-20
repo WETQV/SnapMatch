@@ -15,7 +15,7 @@ cd /d "%~dp0"
 set "ISS_FILE=%~1"
 if "%ISS_FILE%"=="" set "ISS_FILE=SnapMatch_Installer.iss"
 set "OUTPUT_FILE=%~2"
-if "%OUTPUT_FILE%"=="" set "OUTPUT_FILE=SnapMatch_Setup_v1.0.4.4.exe"
+if "%OUTPUT_FILE%"=="" set "OUTPUT_FILE=SnapMatch_Setup_v1.0.5.0.exe"
 
 :: Устанавливаем кодировку UTF-8
 chcp 65001 > nul

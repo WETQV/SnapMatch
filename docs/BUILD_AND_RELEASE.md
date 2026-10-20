@@ -66,7 +66,7 @@ bash build_linux.sh
 
 ```txt
 dist/SnapMatch
-dist/SnapMatch_1.0.4.4_amd64.deb
+dist/SnapMatch_1.0.5.0_amd64.deb
 ```
 
 Пакет устанавливает приложение в:
@@ -84,13 +84,13 @@ snapmatch
 Установка `.deb`:
 
 ```sh
-sudo apt install ./dist/SnapMatch_1.0.4.4_amd64.deb
+sudo apt install ./dist/SnapMatch_1.0.5.0_amd64.deb
 ```
 
 Для кастомной версии можно передать переменную:
 
 ```sh
-SNAPMATCH_VERSION=1.0.4.4 bash build_linux.sh
+SNAPMATCH_VERSION=1.0.5.0 bash build_linux.sh
 ```
 
 Linux-пакет собирается в GitHub Actions на `ubuntu-24.04`. Ручная установка и запуск GUI на отдельной Debian/Ubuntu-машине пока не проверялись. Локально из Windows такой пакет не собрать без WSL/Docker, потому что PyInstaller не делает нормальную cross-platform сборку Windows -> Linux.
@@ -108,7 +108,7 @@ build_installer.bat
 Результат:
 
 ```txt
-installer_output\SnapMatch_Setup_v1.0.4.4.exe
+installer_output\SnapMatch_Setup_v1.0.5.0.exe
 ```
 
 ## Inno Setup
@@ -152,7 +152,7 @@ Workflow `.github/workflows/release-build.yml` собирает Debian/Ubuntu `.
 
 1. Откройте вкладку Actions в GitHub.
 2. Выберите `Build release packages`.
-3. Укажите tag, например `v1.0.4.4`.
+3. Укажите tag, например `v1.0.5.0`.
 4. Оставьте `upload_release=true`, если asset нужно приложить к GitHub Release.
 
 Workflow загружает `.deb` как artifact и, при включённом `upload_release`, прикладывает его к указанному релизу.

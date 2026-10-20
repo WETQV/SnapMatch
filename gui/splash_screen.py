@@ -27,7 +27,7 @@ import os
 from utils.resource_manager import get_resource_path
 
 # Версия показывается внизу; держим в синхроне с version_info.txt / installer_info.txt
-APP_VERSION = "1.0.4.4"
+APP_VERSION = "1.0.5.0"
 
 _FONT_FAMILIES = ["Inter", "Segoe UI", "Noto Sans", "Ubuntu", "Sans Serif"]
 
